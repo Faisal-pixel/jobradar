@@ -1,0 +1,98 @@
+import type { DatabaseSync } from "node:sqlite";
+import type { Job, NewJob, JobPatch } from "../../domain/jobs/job.js";
+import { NotFoundError, ValidationError } from "../../shared/errors.js";
+
+// SQLite has no boolean type; `remote` is stored as an INTEGER 0/1/NULL
+// and converted at the repository boundary so nothing above this layer
+// has to think about it.
+function toSqliteBool(value: boolean | null | undefined): number | null {
+  if (value === null || value === undefined) return null;
+  return value ? 1 : 0;
+}
+
+function mapRow(row: unknown): Job {
+  const raw = row as Record<string, unknown>;
+  return { ...raw, remote: raw.remote === null ? null : Boolean(raw.remote) } as unknown as Job;
+}
+
+export class JobsRepository {
+  constructor(private readonly db: DatabaseSync) {}
+
+  create(input: NewJob): Job {
+    const row = this.db
+      .prepare(
+        `INSERT INTO jobs
+           (company_id, title, location, remote, salary_min, salary_max, salary_currency,
+            description, job_url, application_url, source, source_job_id, date_found,
+            date_posted, fit_score, fit_category, fit_explanation, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, 'new'))
+         RETURNING *`,
+      )
+      .get(
+        input.company_id ?? null,
+        input.title,
+        input.location ?? null,
+        toSqliteBool(input.remote),
+        input.salary_min ?? null,
+        input.salary_max ?? null,
+        input.salary_currency ?? null,
+        input.description ?? null,
+        input.job_url ?? null,
+        input.application_url ?? null,
+        input.source,
+        input.source_job_id,
+        input.date_found ?? null,
+        input.date_posted ?? null,
+        input.fit_score ?? null,
+        input.fit_category ?? null,
+        input.fit_explanation ?? null,
+        input.status ?? null,
+      );
+    return mapRow(row);
+  }
+
+  findById(id: number): Job | null {
+    const row = this.db.prepare("SELECT * FROM jobs WHERE id = ?").get(id);
+    return row ? mapRow(row) : null;
+  }
+
+  findBySource(source: string, sourceJobId: string): Job | null {
+    const row = this.db
+      .prepare("SELECT * FROM jobs WHERE source = ? AND source_job_id = ?")
+      .get(source, sourceJobId);
+    return row ? mapRow(row) : null;
+  }
+
+  list(): Job[] {
+    const rows = this.db.prepare("SELECT * FROM jobs ORDER BY id").all();
+    return rows.map(mapRow);
+  }
+
+  update(id: number, patch: JobPatch): Job {
+    const existing = this.findById(id);
+    if (!existing) throw new NotFoundError("Job", id);
+
+    const fields = Object.keys(patch) as (keyof JobPatch)[];
+    if (fields.length === 0) throw new ValidationError("No fields provided to update");
+
+    const setClause = fields.map((field) => `${field} = ?`).join(", ");
+    const values = fields.map((field) => {
+      const value = patch[field];
+      return field === "remote"
+        ? toSqliteBool(value as boolean | null)
+        : ((value ?? null) as string | number | null);
+    });
+
+    const row = this.db
+      .prepare(
+        `UPDATE jobs SET ${setClause}, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+         WHERE id = ? RETURNING *`,
+      )
+      .get(...values, id);
+    return mapRow(row);
+  }
+
+  delete(id: number): void {
+    this.db.prepare("DELETE FROM jobs WHERE id = ?").run(id);
+  }
+}

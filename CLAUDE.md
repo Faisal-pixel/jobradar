@@ -1,0 +1,214 @@
+# JobRadar — Project Context
+
+This file is read automatically at the start of every Claude Code session in this repo. It replaces re-explaining the project from scratch each time. If anything here goes stale as we build, update this file rather than letting it drift from reality.
+
+## What This Is
+
+JobRadar is Faisal's personal software-engineering job-search operating system — not a job scraper. It discovers jobs, filters them against his preferences, researches the companies and people behind them, tracks the full application/outreach pipeline, and surfaces all of it through Google Sheets, Telegram, and Claude Desktop (via MCP).
+
+Two things working together:
+
+1. **JobRadar itself** — the worker. Runs on a schedule, independent of Claude. Discovers → filters → saves → researches → syncs → notifies. This must work with zero Claude involvement.
+2. **Claude Desktop** — the intelligent researcher/operator, layered on top via MCP. Claude reads/writes JobRadar's data through MCP tools; it does not replace the scheduler or run the core pipeline.
+
+```
+Claude Desktop  ──MCP──▶  JobRadar (MCP Server → App Services → SQLite)
+                                        │
+                              ┌─────────┼─────────┐
+                         Google Sheets          Telegram
+```
+
+## Candidate Profile (Faisal)
+
+Lives in the database as editable preferences, not hardcoded logic:
+
+- Nigeria-based, targeting remote/international roles
+- Target titles: Software Engineer, Full-Stack, Backend, Product Engineer, Founding Engineer, Early Engineer, Infrastructure/Distributed Systems Engineer, AI Engineer (where relevant)
+- Stack interest: TypeScript, Node.js, React/Next.js, APIs, distributed systems, infra, fintech, identity/security, dev tools, IoT
+- Company preference: early-stage / YC / seed–Series A; **5–30 employees is the sweet spot, 31–50 is secondary, 2–4 is opportunistic**
+- Recent YC batch or recent funding = stronger signal
+
+## Tech Stack
+
+- **Language:** TypeScript, strict mode
+- **Runtime:** Node.js (current supported LTS)
+- **Database:** SQLite (source of truth — not Postgres, not in V1)
+- **Validation:** Zod
+- **Containerization:** Docker + Docker Compose
+- **MCP:** current stable MCP TypeScript SDK v2 (`McpServer`, `registerTool()`, `registerResource()`, `registerPrompt()`, `serveStdio()`) — **not** the old monolithic `@modelcontextprotocol/sdk`
+- **Notifications:** Telegram Bot API
+- **Sheets sync:** Google Sheets API
+- **No Anthropic/LLM API in V1.** Claude Desktop is the research interface for now; an AI provider can be added later without a rewrite.
+
+## Layering Principle (non-negotiable)
+
+```
+Claude → MCP Tool → Application Service → Repository → SQLite
+Scheduler → Domain Service → Source Adapter → External Source
+```
+
+MCP is an interface, not a place for logic. A tool handler calls a service; it never touches SQLite, never contains business rules. This keeps the same services reusable behind a future REST API, CLI, or dashboard.
+
+## Folder Structure
+
+```
+jobradar/
+├── src/
+│   ├── app/                     # startup / wiring
+│   ├── config/                  # env vars, secrets — never hardcoded elsewhere
+│   ├── database/
+│   │   ├── schema/               # table/entity definitions
+│   │   ├── migrations/           # schema change history
+│   │   └── repositories/         # ONLY thing allowed to touch SQLite directly
+│   ├── domain/                  # plain definitions of Job/Company/Person/etc — no logic
+│   │   ├── jobs/  companies/  people/  applications/  outreach/
+│   ├── services/                # the actual thinking/business logic
+│   │   ├── job-discovery/  company-research/  people-research/
+│   │   ├── matching/  applications/  outreach/  notifications/  sheets/
+│   ├── sources/                 # one folder per job source, same adapter interface
+│   │   ├── ycombinator/  workatastartup/
+│   ├── scheduler/                # WHEN things run — knows nothing about HOW
+│   ├── shared/                   # logger, custom error classes — cross-cutting, no business logic
+│   ├── mcp/
+│   │   ├── server.ts  tools/  resources/  prompts/
+│   └── index.ts
+├── tests/
+├── data/                         # SQLite file lives here, mounted as a Docker volume
+├── docker/  docker-compose.yml  Dockerfile
+├── .env.example
+```
+
+## Database Schema (core entities)
+
+**Job** — `id, company_id, title, location, remote, salary_min, salary_max, salary_currency, description, job_url, application_url, source, source_job_id, date_found, date_posted, fit_score, fit_category, fit_explanation, status, created_at, updated_at`
+Status: `new → reviewed → qualified → skipped/applied → interviewing → rejected/closed → archived`
+
+**Company** — `id, name, website, domain, yc_batch, team_size, industry, description, funding, funding_stage, location, remote_policy, notes, created_at, updated_at` (future: linkedin, twitter, github, crunchbase, employee_growth, tech_stack)
+
+**Person** — `id, company_id, name, role, category, linkedin_url, email, source, source_url, confidence, notes, created_at, updated_at`
+Category: `founder | cofounder | ceo | cto | engineering_lead | engineer | recruiter | hr | talent | other`
+**Hard rule: never invent names, emails, or LinkedIn URLs. Unknown = `null`, always.**
+
+**Application** — `id, job_id, company_id, role, application_url, date_applied, status, interview_stage, rejection_reason, notes, created_at, updated_at`
+Status: `planned → applied → screening → technical → onsite → offer/rejected → withdrawn`
+
+**Outreach** — `id, company_id, person_id, job_id, channel, date_contacted, status, response, follow_up_date, notes, created_at, updated_at`
+Channel: `linkedin | email | twitter | other` · Status: `draft → planned → contacted → responded/no_response → follow_up → closed`
+
+Don't add fields "because they might be useful later." Extend when a real need shows up.
+
+## Job Source Architecture
+
+```ts
+interface JobSource {
+  name: string;
+  discoverJobs(): Promise<Job[]>;
+  getJob?(id: string): Promise<Job | null>;
+  healthCheck(): Promise<SourceHealth>;
+}
+```
+
+Each source (`sources/ycombinator/`, `sources/workatastartup/`) owns its own fetching, parsing, normalization, retries, and errors. The rest of the app never knows or cares where a job came from. **One source failing must never take down another or crash the scheduler** — catch, log, record health, continue, retry later.
+
+Dedup on `source + source_job_id`, with a normalized `company + role + canonical_url` fallback for cross-source duplicates.
+
+## Job Fit Scoring (100 pts)
+
+`Technical Fit 25 · Company Stage/Team 15 · Funding/Hiring Signal 20 · Remote Eligibility 15 · Role Fit 15 · Founder Accessibility 10`
+`80–100 = A · 65–79 = B · <65 = skip`
+
+Every score must come with an explanation Claude/Faisal can query — never an opaque number. Weights live in config, not hardcoded, so they can be tuned later.
+
+## Google Sheets
+
+Separate sheets, never one crammed tab: **Jobs, Companies, People, Applications, Outreach.** SQLite stays the source of truth — Sheets is a synced view only, never written to directly by the app logic.
+
+## MCP Surface
+
+Group capabilities into a small number of flexible tools with rich filters — do **not** expose dozens of near-duplicate tiny tools (e.g. one `search_jobs` with filters, not `search_jobs_by_role` + `search_jobs_by_salary` + …).
+
+Practical starting surface (build only what the current phase needs):
+`search_jobs, get_job, run_source, get_source_status, get_company, research_company, research_company_people, get_company_jobs, get_company_people, find_people, get_person, save_person, update_person, research_job, get_candidate_profile, get_job_search_preferences, update_job_search_preferences, score_job, explain_job_score, list_applications, update_application, list_pending_outreach, update_outreach, sync_google_sheets, get_sheet_status, run_now, get_automation_status, get_system_health, get_errors, retry_failed_source`
+
+Tool vs. resource: a **tool** does something (`get_candidate_profile()`); a **resource** is something Claude can just read (`candidate://profile`, `jobradar://jobs/new`, `company://{id}/people`, etc.).
+
+**Safety rules, hard requirement:**
+- Drafting tools (`draft_founder_message`, `draft_email`, …) produce text only. **Nothing sends automatically** — no `send_linkedin_message`, no `send_email` — until Faisal explicitly approves and a safe-sending integration is deliberately built.
+- Nothing auto-applies to a job. The system tracks applications; it does not submit them.
+- Destructive tools (`delete_job`, `delete_person`, `merge_duplicates`, `restore_database`) are clearly flagged as destructive in their descriptions.
+
+The full 70+ tool capability catalog was scoped in planning but is **not** all built at once — see Phases below.
+
+## Development Phases
+
+Build in order. Do not jump ahead. Each phase ends with a report (format below) and waits for explicit go-ahead before the next one starts.
+
+| Phase | Name | Delivers |
+|---|---|---|
+| 0 | Architecture & Plan | No code. Inspect repo/tools, propose schema/architecture/Docker/testing plan, flag decisions needing approval. |
+| 1 | Foundation | TS project, SQLite schema, repositories, config, logging, error handling, Docker. `docker compose up` works. No external integrations. |
+| 2 | Job Source Engine | Source adapter interface + YC + Work at a Startup, normalization, dedup, retries, source health. |
+| 3 | Job Matching | Candidate profile, preferences, filtering, fit scoring + explanation. |
+| 4 | Google Sheets | Auth + the 5 sheets + sync tools. SQLite stays canonical. |
+| 5 | Telegram | Job alerts, daily digest, follow-up alerts, test notification. |
+| 6 | Application + Outreach Pipeline | Full status tracking for both applications and outreach/follow-ups. |
+| 7 | MCP Server | Wrap existing services in the starting tool surface above. No new business logic. |
+| 8 | Claude Desktop Integration | Connect and prove real end-to-end workflows work. |
+| 9 | Advanced Research | Funding/team/tech/hiring research tools, founder/CTO research, company comparison. |
+| 10 | Automation | Full scheduler — discovery cadence, digests, follow-up reminders, weekly report. |
+| 11 | Advanced MCP | Resources + prompts (`daily_job_hunt`, `research_company`, `weekly_job_review`, etc.). |
+| 12 | Long-Running Tasks | "Research 30 companies" as a trackable background task (MCP Tasks extension), not a blocking call. |
+| 13 | Future Sources | LinkedIn, HN Who's Hiring, Wellfound, Greenhouse, Lever, career pages — one at a time, same adapter interface. |
+
+**Current phase: 1 — Foundation, in progress.** Update this line as we progress.
+
+## Decisions Log
+
+Decisions made during Phase 0 review, approved 2026-09-16. Recorded here so they don't need re-explaining in a future session.
+
+1. **SQLite library: `node:sqlite`** (Node's built-in module), not `better-sqlite3`. Reason: zero native-module build step, simpler Docker image. Trade-off accepted: fewer years of production hardening, no built-in `.transaction()` helper (transactions are hand-written with `BEGIN`/`COMMIT`/`ROLLBACK`).
+2. **IDs: `INTEGER AUTOINCREMENT`**, not UUIDs. Simpler, smaller, faster joins — fine for a single-writer personal tool.
+3. **Timestamps: `TEXT` ISO-8601 strings**, not unix epoch integers. Human-readable in a SQLite browser, sorts correctly as text.
+4. **MCP transport: Streamable HTTP, bound to `127.0.0.1` only**, not stdio via `docker exec`. Claude Desktop connects to a localhost URL rather than spawning a subprocess inside the container.
+5. **Docker topology: one combined container** running both the scheduler and the MCP server, not split into separate containers. Fewer moving parts for a personal tool.
+6. **SQLite persistence: bind mount `./data:/app/data`**, not a named Docker volume. Lets the `.db` file be opened directly with a SQLite browser on the host for debugging.
+7. **Test framework: Vitest**, not Jest. Native TS/ESM support, less config overhead.
+8. **Added `src/shared/`** to the folder structure (not in the original CLAUDE.md tree) — home for the logger and custom error classes, both required by Phase 1 but with no other natural home.
+9. **Zod: pinned to `4.6.5`** (latest at time of decision). Note for future sessions: Zod 4 has minor schema-API differences from Zod 3 — don't assume Zod 3 tutorials/examples apply directly.
+
+## Development Rules (non-negotiable)
+
+1. **Don't jump ahead.** Stay inside the current phase's scope.
+2. **Explain before major architectural decisions** — Faisal is learning while building this.
+3. **Prefer simple.** No Kubernetes, microservices, Redis, Kafka, RabbitMQ, Postgres, AWS, or complex cloud infra unless a real need forces it. SQLite + Docker + Node is enough.
+4. **No AI/Anthropic API dependency in V1.** Claude Desktop/Code are the research interface; don't assume API credits exist. Design so a provider can be plugged in later.
+5. **Never fabricate data** — emails, LinkedIn URLs, people, funding, job details. Unknown = `null`, always.
+6. **Don't silently make significant assumptions.** Surface anything that meaningfully affects the architecture.
+7. **TypeScript strict mode**, typed domain models, validated external input, explicit error handling.
+8. **Every external integration needs failure handling.** The internet will fail; JobRadar shouldn't.
+9. **Write tests alongside the functionality**, not all at the end.
+10. **Keep MCP thin** — it calls services, it doesn't contain them.
+11. **SQLite is the source of truth.** Google Sheets is a synced view, never primary.
+12. **Don't overengineer.** This is a personal tool first.
+
+## Working Style
+
+Faisal is learning while building this — don't dump large blocks of code unexplained.
+
+For each phase: explain what we're building and why → show the architecture → break it into small steps → implement one step → test it → explain what changed → move to the next step. Favor "think of it like…" plain-language explanations over jargon-first ones.
+
+## Phase Completion Report Format
+
+End every phase with exactly this, then stop and wait:
+
+```
+PHASE COMPLETE
+What we built:
+Files created:
+Files changed:
+Tests:
+How to run:
+What I learned:
+Known limitations:
+Next phase:
+```

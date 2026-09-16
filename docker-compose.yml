@@ -1,0 +1,14 @@
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      LOG_LEVEL: info
+      DB_PATH: ./data/jobradar.db
+    volumes:
+      - ./data:/app/data
+    # No ports published yet — the MCP server (Streamable HTTP, localhost-only)
+    # is built in Phase 7. It will add something like:
+    #   ports:
+    #     - "127.0.0.1:3939:3939"

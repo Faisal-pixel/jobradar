@@ -1,0 +1,31 @@
+{
+  "name": "jobradar",
+  "version": "1.0.0",
+  "description": "Faisal's personal job-search operating system",
+  "private": true,
+  "main": "dist/app/index.js",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/app/index.js",
+    "dev": "tsx src/app/index.ts",
+    "cli": "tsx src/app/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.5",
+    "tsx": "^4.23.13",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  }
+}
