@@ -20,6 +20,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "cheerio": "^1.2.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {

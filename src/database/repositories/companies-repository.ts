@@ -36,6 +36,17 @@ export class CompaniesRepository {
     return (row as unknown as Company) ?? null;
   }
 
+  // Case-insensitive exact match. Good enough for one source repeatedly
+  // reporting the same company name run over run; fuzzy/near-duplicate
+  // matching across differently-spelled company names is not attempted
+  // here — that's research-phase territory, not job discovery.
+  findByName(name: string): Company | null {
+    const row = this.db
+      .prepare("SELECT * FROM companies WHERE LOWER(name) = LOWER(?) LIMIT 1")
+      .get(name);
+    return (row as unknown as Company) ?? null;
+  }
+
   list(): Company[] {
     const rows = this.db.prepare("SELECT * FROM companies ORDER BY id").all();
     return rows as unknown as Company[];

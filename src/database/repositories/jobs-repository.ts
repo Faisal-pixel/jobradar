@@ -63,6 +63,23 @@ export class JobsRepository {
     return row ? mapRow(row) : null;
   }
 
+  // Cross-source dedup fallback (CLAUDE.md's "normalized company + role"
+  // rule): same company, same title (case/whitespace-insensitive), from
+  // a *different* source than the one asking. Exact same-source repeats
+  // are already caught by the source+source_job_id UNIQUE constraint via
+  // findBySource — this is only for the same job cross-posted elsewhere.
+  findPotentialDuplicate(companyId: number, title: string, excludingSource: string): Job | null {
+    const normalizedTitle = title.trim().toLowerCase();
+    const row = this.db
+      .prepare(
+        `SELECT * FROM jobs
+         WHERE company_id = ? AND LOWER(TRIM(title)) = ? AND source != ?
+         LIMIT 1`,
+      )
+      .get(companyId, normalizedTitle, excludingSource);
+    return row ? mapRow(row) : null;
+  }
+
   list(): Job[] {
     const rows = this.db.prepare("SELECT * FROM jobs ORDER BY id").all();
     return rows.map(mapRow);

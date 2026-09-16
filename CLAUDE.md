@@ -66,7 +66,7 @@ jobradar/
 │   │   ├── job-discovery/  company-research/  people-research/
 │   │   ├── matching/  applications/  outreach/  notifications/  sheets/
 │   ├── sources/                 # one folder per job source, same adapter interface
-│   │   ├── ycombinator/  workatastartup/
+│   │   ├── workatastartup/       # this IS YC Jobs — see Decisions Log #10
 │   ├── scheduler/                # WHEN things run — knows nothing about HOW
 │   ├── shared/                   # logger, custom error classes — cross-cutting, no business logic
 │   ├── mcp/
@@ -108,7 +108,7 @@ interface JobSource {
 }
 ```
 
-Each source (`sources/ycombinator/`, `sources/workatastartup/`) owns its own fetching, parsing, normalization, retries, and errors. The rest of the app never knows or cares where a job came from. **One source failing must never take down another or crash the scheduler** — catch, log, record health, continue, retry later.
+Each source (currently just `sources/workatastartup/` — see Decisions Log #10 on why there's no separate `ycombinator/` adapter) owns its own fetching, parsing, normalization, retries, and errors. The rest of the app never knows or cares where a job came from. **One source failing must never take down another or crash the scheduler** — catch, log, record health, continue, retry later.
 
 Dedup on `source + source_job_id`, with a normalized `company + role + canonical_url` fallback for cross-source duplicates.
 
@@ -160,7 +160,7 @@ Build in order. Do not jump ahead. Each phase ends with a report (format below) 
 | 12 | Long-Running Tasks | "Research 30 companies" as a trackable background task (MCP Tasks extension), not a blocking call. |
 | 13 | Future Sources | LinkedIn, HN Who's Hiring, Wellfound, Greenhouse, Lever, career pages — one at a time, same adapter interface. |
 
-**Current phase: 1 — Foundation, in progress.** Update this line as we progress.
+**Current phase: 2 — Job Source Engine, in progress.** Update this line as we progress.
 
 ## Decisions Log
 
@@ -175,6 +175,15 @@ Decisions made during Phase 0 review, approved 2026-09-16. Recorded here so they
 7. **Test framework: Vitest**, not Jest. Native TS/ESM support, less config overhead.
 8. **Added `src/shared/`** to the folder structure (not in the original CLAUDE.md tree) — home for the logger and custom error classes, both required by Phase 1 but with no other natural home.
 9. **Zod: pinned to `4.6.5`** (latest at time of decision). Note for future sessions: Zod 4 has minor schema-API differences from Zod 3 — don't assume Zod 3 tutorials/examples apply directly.
+
+Decisions made during Phase 2 investigation, approved 2026-09-16.
+
+10. **One source adapter, not two: `sources/workatastartup/`, dropping `sources/ycombinator/`.** Confirmed by fetching `ycombinator.com/jobs` directly and decoding its embedded Inertia payload: it's a marketing landing page (`WaasLandingPage` component) with zero job listings — its only real content is links out to `workatastartup.com`. The actual job board lives entirely at `workatastartup.com/jobs`. "Work at a Startup" *is* YC Jobs, just under a different domain — there was never a second dataset to build a second adapter against.
+11. **Discovery via `GET /jobs/search?q=...`**, a real, public, unauthenticated JSON endpoint (`{"jobs": [...]}`, `content-type: application/json` — confirmed directly, no HTML/Inertia parsing needed for this call). `discoverJobs()` runs a short, configurable list of search queries built from the candidate profile's target roles/stack (e.g. "backend engineer remote", "founding engineer Node.js") — one request per query, ~1 req/sec — instead of one fixed listing URL. Each query's results feed through the same dedup logic, so overlapping hits across queries collapse into one job record.
+12. **Two-tier fetch: search (cheap) then detail (only for new jobs).** The search/list JSON gives id, title, company name/slug/batch, location, salary as one string, and a company one-liner — enough to detect whether a job is already known. Only jobs not already in the DB (by `source` + `source_job_id`) get a follow-up fetch to `/jobs/{id}` (an HTML page with a richer payload embedded as Inertia JSON: split salary/equity range, visa sponsorship, min experience, skills, full description, and full company detail) for full normalization. This keeps request volume proportional to *new* jobs per run, not total jobs.
+13. **Pagination doesn't work on this site, on any endpoint tested.** Tried `page`, `offset`, `cursor`, `after`, and the proper Inertia partial-reload protocol (`X-Inertia` header + matching asset version) against both `/jobs` and `/jobs/search` — all capped at 30 results with no observed way to reach results 31+. The site reports ~2,850 total jobs; JobRadar cannot enumerate all of them without reverse-engineering the app's internals or automating a login, and neither is worth doing for a personal tool. Multi-query search (decision 11) widens coverage but this is explicitly **not exhaustive** — accepted as a known limitation, not silently ignored.
+14. **Remote eligibility is inferred, not a real field.** Neither the search/list JSON nor the job-detail payload has a boolean/enum "remote" field anywhere. It's derived by pattern-matching the free-text `location` string (e.g. `/remote/i`). Treated in code and data as an inference, not a confirmed fact.
+15. **Source health schema** (proposed in Phase 2 since CLAUDE.md didn't define one): a `source_health` table — one row per source — tracking `status` (`healthy`/`degraded`/`failing`), `last_success_at`, `last_failure_at`, `consecutive_failures`, `last_error`. `healthy` = last run succeeded; `degraded` = 1–2 consecutive failures (transient — site hiccup, timeout); `failing` = 3+ consecutive failures (something's actually broken, e.g. the site changed its HTML/JSON shape). Rationale: `get_source_status`/`get_system_health` (both already named in CLAUDE.md's MCP surface) need something to read, and "degraded" vs "failing" lets Faisal/Claude tell "probably fine, retry later" apart from "this adapter needs a fix."
 
 ## Development Rules (non-negotiable)
 
