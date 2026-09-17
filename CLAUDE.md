@@ -62,7 +62,7 @@ jobradar/
 │   │   └── repositories/         # ONLY thing allowed to touch SQLite directly
 │   ├── domain/                  # plain definitions of Job/Company/Person/etc — no logic
 │   │   ├── jobs/  companies/  people/  applications/  outreach/
-│   │   ├── sources/  candidate-profile/
+│   │   ├── sources/  candidate-profile/  sheets/
 │   ├── services/                # the actual thinking/business logic
 │   │   ├── job-discovery/  company-research/  people-research/
 │   │   ├── matching/  applications/  outreach/  notifications/  sheets/
@@ -75,6 +75,7 @@ jobradar/
 │   └── index.ts
 ├── tests/
 ├── data/                         # SQLite file lives here, mounted as a Docker volume
+├── credentials/                   # gitignored: google-client.json, google-token.json (Phase 4)
 ├── docker/  docker-compose.yml  Dockerfile
 ├── .env.example
 ```
@@ -161,7 +162,7 @@ Build in order. Do not jump ahead. Each phase ends with a report (format below) 
 | 12 | Long-Running Tasks | "Research 30 companies" as a trackable background task (MCP Tasks extension), not a blocking call. |
 | 13 | Future Sources | LinkedIn, HN Who's Hiring, Wellfound, Greenhouse, Lever, career pages — one at a time, same adapter interface. |
 
-**Current phase: 3 — Job Matching, in progress.** Update this line as we progress.
+**Current phase: 4 — Google Sheets, in progress.** Update this line as we progress.
 
 ## Decisions Log
 
@@ -195,6 +196,19 @@ Decisions made during Phase 3 investigation, approved 2026-09-16.
 20. **Filtering is a separate, query-time capability — not a pre-scoring gate.** Every discovered job gets a full 6-dimension score, always with an explanation, even one that's clearly inaccessible (e.g. on-site-only) — it lands low via Remote Eligibility with that reasoning stated, rather than being silently skipped with no explanation at all (which would cut against "every score must come with an explanation"). `JobsRepository.findByFilters()` (status/fitCategory/minFitScore/remoteOnly) is the query-time capability a future `search_jobs` MCP tool (Phase 7) will wrap.
 21. **Funding/Hiring Signal (20pts) split into two sub-components**, since half its name is permanently unavailable from this source, not just per-job missing: recency (60% of the dimension — the better of YC batch age and `last_active` age, real data) and funding (40% — `company.funding`/`funding_stage`, which Work at a Startup never provides at all, confirmed during investigation; always scored at neutral with that limitation stated once, not treated as a per-job gap).
 22. **Fit scoring weights live in `src/config/fit-scoring-weights.ts`**, individually overridable via `FIT_WEIGHT_*` env vars (same pattern as Phase 2's `search-queries.ts`), defaulting to CLAUDE.md's stated 25/15/20/15/15/10 — validated at startup to sum to 100. The A/80–B/65–skip category thresholds are fixed constants in the same file, not env-overridable — CLAUDE.md calls out weights specifically as tunable, not the thresholds, and a personal tool doesn't need a config knob for every constant.
+
+Decisions made during Phase 4 investigation, approved 2026-09-17.
+
+23. **Auth: OAuth 2.0 "Desktop app" flow, not a service account — changed mid-phase.** The original service-account plan was blocked by Faisal's actual Google Cloud org policy (`iam.disableServiceAccountKeyCreation`, confirmed via the Console UI, not assumed) preventing key creation. Switched to OAuth: a one-time browser sign-in as Faisal himself, using a Desktop-app OAuth client ID (`client_id`/`client_secret`, not a sensitive long-lived key), followed by a saved refresh token so every later run is unattended. Since auth is as Faisal's own account, the earlier "share the spreadsheet with a service account" step is gone — he just owns the sheet directly.
+24. **Refresh token must come from a "published to production" OAuth consent screen, not left in "Testing."** Verified current Google policy: refresh tokens issued while the consent screen is in Testing status expire after 7 days regardless of test-user status — which would have silently broken "sign in once, never again" a week after setup. The `.../auth/spreadsheets` scope is "sensitive" (not "restricted"), so publishing to production needs no formal verification for a single-user app (Google explicitly exempts under-100-user apps) — just clicking through the one-time "unverified app" warning during Faisal's own sign-in.
+25. **Loopback flow, not the old "out-of-band" copy-paste flow.** Google deprecated OOB in 2022. The one-time sign-in starts a temporary local HTTP server on an arbitrary free `http://127.0.0.1:<port>`, uses that as the OAuth redirect URI (Desktop-app clients accept any loopback port without pre-registering one), and captures the authorization code when Google redirects back after consent.
+26. **The one-time sign-in must happen locally (`npm run dev`-style), not through `docker compose exec`.** The loopback server binds inside the container's network namespace, which the host browser can't reach without extra port-mapping plumbing — not worth building for a step that only ever runs once. `credentials/google-token.json` (bind-mounted, same pattern as `./data`) is what makes every later run — local or containerized — skip the browser entirely.
+27. **Credential file layout**: `credentials/google-client.json` (the downloaded OAuth client — id/secret, not especially sensitive on its own) and `credentials/google-token.json` (the saved refresh token — at least as sensitive as the file it replaced). Both gitignored; `credentials/` bind-mounted into the container read-write (the token file gets written to it on first sign-in) rather than baked into the image.
+28. **Sync strategy: full overwrite every run**, not incremental. Google's current documented Sheets API quota (300 read + 300 write requests/min per project, 60/min per user — verified, not assumed) makes this cheap: `spreadsheets.get` (check existing tabs) + one `batchUpdate` (add any missing tabs) + one `values.batchClear` + one `values.batchUpdate` (clear and rewrite all 5 tabs' data) — at most 4 calls per sync, regardless of row count. Full overwrite is also self-correcting: a partial failure mid-sync is silently fixed by the next successful run, since nothing here is incremental/diffed.
+29. **`sheet_sync_status` table**, identical shape/reasoning to Phase 2's `source_health` (`status`/`last_success_at`/`last_failure_at`/`consecutive_failures`/`last_error`, same healthy/degraded/failing thresholds), keyed by `target` (currently just `"google_sheets"`). Backs the already-named `get_sheet_status` MCP tool (Phase 7) the same way `source_health` backs `get_source_status`.
+30. **Sheet columns are joined/denormalized at sync time, not raw DB columns.** Foreign keys (`company_id`, `job_id`, `person_id`) become names/titles via lookup maps built once per sync — Sheets is a human-readable view (CLAUDE.md), and a spreadsheet full of numeric IDs wouldn't be one.
+31. **Trigger: `sync-sheets` CLI command**, same pattern as `discover-jobs`/`score-jobs` — confirmed, no scheduler exists until Phase 10. Maps directly to CLAUDE.md's `sync_google_sheets` MCP tool name (Phase 7 wraps the same service, no new logic).
+32. **CLI now exits explicitly (`process.exit()`) after `main()` resolves/rejects**, rather than relying on the event loop to drain naturally. Found live during the very first real OAuth sign-in verification: Google's HTTP client (`gaxios`, used internally by `googleapis`) leaves a keep-alive socket open, which silently hung the `sync-sheets` process after it had already finished all its work and printed "Sync complete." — needed a manual kill. Standard fix for a one-shot CLI; not worth chasing into gaxios's internals for a personal tool.
 
 ## Development Rules (non-negotiable)
 

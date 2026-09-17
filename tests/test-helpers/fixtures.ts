@@ -2,6 +2,8 @@ import type { Job } from "../../src/domain/jobs/job.js";
 import type { Company } from "../../src/domain/companies/company.js";
 import type { Person } from "../../src/domain/people/person.js";
 import type { CandidateProfile } from "../../src/domain/candidate-profile/candidate-profile.js";
+import type { Application } from "../../src/domain/applications/application.js";
+import type { Outreach } from "../../src/domain/outreach/outreach.js";
 
 const NOW = "2026-09-16T00:00:00.000Z";
 
@@ -66,6 +68,42 @@ export function buildPerson(overrides: Partial<Person> = {}): Person {
     source: "workatastartup",
     source_url: null,
     confidence: null,
+    notes: null,
+    created_at: NOW,
+    updated_at: NOW,
+    ...overrides,
+  };
+}
+
+export function buildApplication(overrides: Partial<Application> = {}): Application {
+  return {
+    id: 1,
+    job_id: 1,
+    company_id: 1,
+    role: null,
+    application_url: null,
+    date_applied: null,
+    status: "planned",
+    interview_stage: null,
+    rejection_reason: null,
+    notes: null,
+    created_at: NOW,
+    updated_at: NOW,
+    ...overrides,
+  };
+}
+
+export function buildOutreach(overrides: Partial<Outreach> = {}): Outreach {
+  return {
+    id: 1,
+    company_id: 1,
+    person_id: 1,
+    job_id: 1,
+    channel: null,
+    date_contacted: null,
+    status: "draft",
+    response: null,
+    follow_up_date: null,
     notes: null,
     created_at: NOW,
     updated_at: NOW,

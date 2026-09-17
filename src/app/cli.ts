@@ -12,6 +12,11 @@ import { SourceManager } from "../services/job-discovery/source-manager.js";
 import { ScoringPipeline } from "../services/matching/scoring-pipeline.js";
 import { WorkAtAStartupSource } from "../sources/workatastartup/index.js";
 import type { JobStatus, JobFitCategory } from "../domain/jobs/job.js";
+import { SheetSyncStatusRepository } from "../database/repositories/sheet-sync-status-repository.js";
+import { getAuthorizedClient } from "../services/sheets/google-auth.js";
+import { GoogleSheetsClient } from "../services/sheets/sheets-client.js";
+import { SheetsSyncService } from "../services/sheets/sheets-sync.js";
+import { env } from "../config/env.js";
 
 function parseFlags(args: string[]): Record<string, string | true> {
   const flags: Record<string, string | true> = {};
@@ -32,6 +37,7 @@ async function main(): Promise<void> {
   const jobs = new JobsRepository(db);
   const sourceHealth = new SourceHealthRepository(db);
   const candidateProfile = new CandidateProfileRepository(db);
+  const sheetSyncStatus = new SheetSyncStatusRepository(db);
 
   switch (command) {
     case "insert-company": {
@@ -82,10 +88,30 @@ async function main(): Promise<void> {
       console.log(JSON.stringify(jobs.findByFilters(filters), null, 2));
       break;
     }
+    case "sync-sheets": {
+      if (!env.GOOGLE_SHEETS_SPREADSHEET_ID) {
+        console.error(
+          "GOOGLE_SHEETS_SPREADSHEET_ID is not set. Create a Google Sheet, share it with " +
+            "yourself (you already own it), and set that env var to its ID from the sheet's URL.",
+        );
+        process.exitCode = 1;
+        break;
+      }
+      const auth = await getAuthorizedClient();
+      const sheetsClient = new GoogleSheetsClient(auth, env.GOOGLE_SHEETS_SPREADSHEET_ID);
+      const sync = new SheetsSyncService(db, sheetsClient);
+      await sync.sync();
+      console.log("Sync complete.");
+      break;
+    }
+    case "sheet-status": {
+      console.log(JSON.stringify(sheetSyncStatus.list(), null, 2));
+      break;
+    }
     default: {
       console.error(
         "Usage: cli <insert-company|list-companies|list-jobs|source-health|discover-jobs|" +
-          "score-jobs|get-profile|search-jobs> [args]\n" +
+          "score-jobs|get-profile|search-jobs|sync-sheets|sheet-status> [args]\n" +
           "  search-jobs --status=reviewed --fitCategory=A --minFitScore=70 --remote",
       );
       process.exitCode = 1;
@@ -95,4 +121,13 @@ async function main(): Promise<void> {
   closeDb();
 }
 
-main();
+// Google's HTTP client (gaxios) can leave a keep-alive socket open, which
+// otherwise silently hangs the process after the command's actual work is
+// done — explicit exit is the standard fix for a one-shot CLI, not
+// something worth chasing into gaxios's internals.
+main()
+  .then(() => process.exit(process.exitCode ?? 0))
+  .catch((error: unknown) => {
+    console.error(error);
+    process.exit(1);
+  });

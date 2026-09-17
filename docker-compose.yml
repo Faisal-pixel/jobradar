@@ -6,8 +6,14 @@ services:
       NODE_ENV: production
       LOG_LEVEL: info
       DB_PATH: ./data/jobradar.db
+      GOOGLE_SHEETS_SPREADSHEET_ID: ${GOOGLE_SHEETS_SPREADSHEET_ID:-}
     volumes:
       - ./data:/app/data
+      # The one-time OAuth sign-in (loopback browser flow) needs to run
+      # locally, not through Docker — see CLAUDE.md Decisions Log. Once
+      # google-token.json exists here, containerized runs reuse it with
+      # no browser involved.
+      - ./credentials:/app/credentials
     # No ports published yet — the MCP server (Streamable HTTP, localhost-only)
     # is built in Phase 7. It will add something like:
     #   ports:

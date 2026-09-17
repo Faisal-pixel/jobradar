@@ -18,6 +18,13 @@ const envSchema = z.object({
   FIT_WEIGHT_REMOTE: z.coerce.number().optional(),
   FIT_WEIGHT_ROLE: z.coerce.number().optional(),
   FIT_WEIGHT_FOUNDER_ACCESS: z.coerce.number().optional(),
+  // Google Sheets sync (Phase 4). All optional at the env-schema level so
+  // the rest of the app still starts without Sheets configured — the
+  // sync-sheets command itself does the real "is this actually set up"
+  // check and fails clearly if not.
+  GOOGLE_OAUTH_CLIENT_PATH: z.string().min(1).default("./credentials/google-client.json"),
+  GOOGLE_OAUTH_TOKEN_PATH: z.string().min(1).default("./credentials/google-token.json"),
+  GOOGLE_SHEETS_SPREADSHEET_ID: z.string().min(1).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;
