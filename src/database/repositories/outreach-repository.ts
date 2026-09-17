@@ -38,6 +38,22 @@ export class OutreachRepository {
     return rows as unknown as Outreach[];
   }
 
+  // Follow-up alerts (Phase 5): overdue-or-due-today, still-open
+  // commitments. Deliberately no "already alerted" tracking here — it's
+  // correct for this to keep surfacing the same row every run until its
+  // status is updated (that update IS the "stop reminding me" signal).
+  findDueFollowUps(asOfDate: string): Outreach[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM outreach
+         WHERE follow_up_date IS NOT NULL AND follow_up_date <= ?
+           AND status NOT IN ('closed', 'responded')
+         ORDER BY follow_up_date, id`,
+      )
+      .all(asOfDate);
+    return rows as unknown as Outreach[];
+  }
+
   update(id: number, patch: OutreachPatch): Outreach {
     const existing = this.findById(id);
     if (!existing) throw new NotFoundError("Outreach", id);

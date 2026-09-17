@@ -7,6 +7,8 @@ services:
       LOG_LEVEL: info
       DB_PATH: ./data/jobradar.db
       GOOGLE_SHEETS_SPREADSHEET_ID: ${GOOGLE_SHEETS_SPREADSHEET_ID:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
     volumes:
       - ./data:/app/data
       # The one-time OAuth sign-in (loopback browser flow) needs to run

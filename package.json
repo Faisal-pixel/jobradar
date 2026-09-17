@@ -10,9 +10,9 @@
   },
   "scripts": {
     "build": "tsc",
-    "start": "node dist/app/index.js",
-    "dev": "tsx src/app/index.ts",
-    "cli": "tsx src/app/cli.ts",
+    "start": "node --env-file-if-exists=.env dist/app/index.js",
+    "dev": "tsx --env-file-if-exists=.env src/app/index.ts",
+    "cli": "tsx --env-file-if-exists=.env src/app/cli.ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },

@@ -28,6 +28,7 @@ export function buildJob(overrides: Partial<Job> = {}): Job {
     fit_category: null,
     fit_explanation: null,
     status: "new",
+    alerted_at: null,
     created_at: NOW,
     updated_at: NOW,
     ...overrides,

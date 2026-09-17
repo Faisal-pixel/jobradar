@@ -17,6 +17,23 @@ import { getAuthorizedClient } from "../services/sheets/google-auth.js";
 import { GoogleSheetsClient } from "../services/sheets/sheets-client.js";
 import { SheetsSyncService } from "../services/sheets/sheets-sync.js";
 import { env } from "../config/env.js";
+import { TelegramBotClient, fetchRecentChatIds, type TelegramClient } from "../services/notifications/telegram-client.js";
+import { TEST_NOTIFICATION_MESSAGE } from "../services/notifications/templates.js";
+import { JobAlertsService } from "../services/notifications/job-alerts.js";
+import { DailyDigestService } from "../services/notifications/daily-digest.js";
+import { FollowUpAlertsService } from "../services/notifications/follow-up-alerts.js";
+
+function requireTelegramClient(): TelegramClient | null {
+  if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) {
+    console.error(
+      "TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID must both be set. Create a bot via @BotFather, " +
+        "message it once, then run `cli get-telegram-chat-id <token>` to find your chat ID.",
+    );
+    process.exitCode = 1;
+    return null;
+  }
+  return new TelegramBotClient(env.TELEGRAM_BOT_TOKEN, env.TELEGRAM_CHAT_ID);
+}
 
 function parseFlags(args: string[]): Record<string, string | true> {
   const flags: Record<string, string | true> = {};
@@ -108,10 +125,58 @@ async function main(): Promise<void> {
       console.log(JSON.stringify(sheetSyncStatus.list(), null, 2));
       break;
     }
+    case "send-test": {
+      const telegram = requireTelegramClient();
+      if (!telegram) break;
+      await telegram.sendMessage(TEST_NOTIFICATION_MESSAGE);
+      console.log("Test notification sent.");
+      break;
+    }
+    case "send-alerts": {
+      const telegram = requireTelegramClient();
+      if (!telegram) break;
+      const result = await new JobAlertsService(db, telegram).run();
+      console.log(JSON.stringify(result, null, 2));
+      break;
+    }
+    case "send-digest": {
+      const telegram = requireTelegramClient();
+      if (!telegram) break;
+      const result = await new DailyDigestService(db, telegram).run();
+      console.log(JSON.stringify(result, null, 2));
+      break;
+    }
+    case "send-followups": {
+      const telegram = requireTelegramClient();
+      if (!telegram) break;
+      const result = await new FollowUpAlertsService(db, telegram).run();
+      console.log(JSON.stringify(result, null, 2));
+      break;
+    }
+    case "get-telegram-chat-id": {
+      const token = args[0] ?? env.TELEGRAM_BOT_TOKEN;
+      if (!token) {
+        console.error("Usage: cli get-telegram-chat-id <bot-token>  (or set TELEGRAM_BOT_TOKEN)");
+        process.exitCode = 1;
+        break;
+      }
+      const chatIds = await fetchRecentChatIds(token);
+      if (chatIds.length === 0) {
+        console.error(
+          "No chat IDs found. Message your bot at least once in Telegram, then run this again.",
+        );
+        process.exitCode = 1;
+        break;
+      }
+      console.log(`Found chat ID(s): ${chatIds.join(", ")}`);
+      console.log("Set TELEGRAM_CHAT_ID to the right one above (usually there's only one).");
+      break;
+    }
     default: {
       console.error(
         "Usage: cli <insert-company|list-companies|list-jobs|source-health|discover-jobs|" +
-          "score-jobs|get-profile|search-jobs|sync-sheets|sheet-status> [args]\n" +
+          "score-jobs|get-profile|search-jobs|sync-sheets|sheet-status|send-test|send-alerts|" +
+          "send-digest|send-followups|get-telegram-chat-id> [args]\n" +
           "  search-jobs --status=reviewed --fitCategory=A --minFitScore=70 --remote",
       );
       process.exitCode = 1;

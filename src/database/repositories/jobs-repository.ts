@@ -121,6 +121,24 @@ export class JobsRepository {
     return rows.map(mapRow);
   }
 
+  // Instant Category-A alerts: everything scored 'A' that hasn't been
+  // alerted yet. alerted_at is what makes re-running send-alerts safe.
+  findUnalertedByCategory(category: JobFitCategory): Job[] {
+    const rows = this.db
+      .prepare("SELECT * FROM jobs WHERE fit_category = ? AND alerted_at IS NULL ORDER BY fit_score DESC, id")
+      .all(category);
+    return rows.map(mapRow);
+  }
+
+  // Daily digest's fixed lookback window (Decisions Log: stateless by
+  // design, no "last digest sent" tracking).
+  findDiscoveredSince(isoTimestamp: string): Job[] {
+    const rows = this.db
+      .prepare("SELECT * FROM jobs WHERE date_found >= ? ORDER BY fit_score DESC, id")
+      .all(isoTimestamp);
+    return rows.map(mapRow);
+  }
+
   update(id: number, patch: JobPatch): Job {
     const existing = this.findById(id);
     if (!existing) throw new NotFoundError("Job", id);

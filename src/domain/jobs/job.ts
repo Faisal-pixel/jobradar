@@ -34,6 +34,10 @@ export interface Job {
   fit_category: JobFitCategory | null;
   fit_explanation: string | null;
   status: JobStatus;
+  // NULL = never alerted via Telegram. Set the moment an instant
+  // Category-A alert is sent (see services/notifications/job-alerts.ts)
+  // so re-running send-alerts never re-notifies the same job.
+  alerted_at: string | null;
   created_at: string;
   updated_at: string;
 }
