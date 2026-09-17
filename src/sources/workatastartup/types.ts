@@ -41,9 +41,17 @@ export const waasJobDetailSchema = z.object({
 });
 export type WaasJobDetail = z.infer<typeof waasJobDetailSchema>;
 
-// Shape embedded in the same payload (props.company). founders/jobs are
-// present in the real response but unused in Phase 2 (see CLAUDE.md
-// Decisions Log — founder research is Phase 9), so they're left loose.
+// A founder entry on the company detail payload — real, scraped data
+// (name + LinkedIn when the company provided it), not fabricated. `jobs`
+// (the company's other listings) stays untyped/unused — out of scope here.
+export const waasFounderSchema = z.object({
+  name: z.string(),
+  bio: z.string().nullable().optional(),
+  pastCompanies: z.string().nullable().optional(),
+  linkedin: z.string().nullable().optional(),
+});
+export type WaasFounder = z.infer<typeof waasFounderSchema>;
+
 export const waasCompanyDetailSchema = z.object({
   name: z.string(),
   slug: z.string(),
@@ -55,7 +63,7 @@ export const waasCompanyDetailSchema = z.object({
   teamSize: z.number().nullable().optional(),
   industry: z.string().nullable().optional(),
   industries: z.array(z.string()).nullable().optional(),
-  founders: z.array(z.unknown()).optional(),
+  founders: z.array(waasFounderSchema).optional(),
   jobs: z.array(z.unknown()).optional(),
 });
 export type WaasCompanyDetail = z.infer<typeof waasCompanyDetailSchema>;

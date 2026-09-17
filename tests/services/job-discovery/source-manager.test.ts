@@ -4,12 +4,18 @@ import { createTestDb } from "../../test-helpers/create-test-db.js";
 import { SourceManager } from "../../../src/services/job-discovery/source-manager.js";
 import { JobsRepository } from "../../../src/database/repositories/jobs-repository.js";
 import { CompaniesRepository } from "../../../src/database/repositories/companies-repository.js";
+import { PeopleRepository } from "../../../src/database/repositories/people-repository.js";
 import { SourceHealthRepository } from "../../../src/database/repositories/source-health-repository.js";
 import type { JobSource, DiscoveredJob } from "../../../src/sources/job-source.js";
 import type { NewJob } from "../../../src/domain/jobs/job.js";
 import type { NewCompany } from "../../../src/domain/companies/company.js";
+import type { NewPerson } from "../../../src/domain/people/person.js";
 
-function discoveredJob(overrides: Partial<NewJob> = {}, company: Partial<NewCompany> = {}): DiscoveredJob {
+function discoveredJob(
+  overrides: Partial<NewJob> = {},
+  company: Partial<NewCompany> = {},
+  founders: NewPerson[] = [],
+): DiscoveredJob {
   return {
     job: {
       title: "Backend Engineer",
@@ -18,6 +24,7 @@ function discoveredJob(overrides: Partial<NewJob> = {}, company: Partial<NewComp
       ...overrides,
     },
     company: { name: "Acme Robotics", ...company },
+    founders,
   };
 }
 
@@ -54,12 +61,14 @@ describe("SourceManager", () => {
   let db: DatabaseSync;
   let jobs: JobsRepository;
   let companies: CompaniesRepository;
+  let people: PeopleRepository;
   let sourceHealth: SourceHealthRepository;
 
   beforeEach(() => {
     db = createTestDb();
     jobs = new JobsRepository(db);
     companies = new CompaniesRepository(db);
+    people = new PeopleRepository(db);
     sourceHealth = new SourceHealthRepository(db);
   });
 
@@ -145,5 +154,46 @@ describe("SourceManager", () => {
     // Second run: job already known, must not call getJob again.
     await manager.runAll();
     expect(source.getJobCallCount).toBe(1);
+  });
+
+  it("persists founders when a company is newly created", async () => {
+    const founder: NewPerson = { name: "Jane Founder", category: "founder", linkedin_url: "https://linkedin.com/in/jane" };
+    const source = new FakeJobSource("fake-source", [discoveredJob({}, {}, [founder])]);
+    const manager = new SourceManager(db, [source]);
+
+    await manager.runAll();
+
+    const company = companies.findByName("Acme Robotics")!;
+    const persistedFounders = people.list().filter((p) => p.company_id === company.id);
+    expect(persistedFounders).toHaveLength(1);
+    expect(persistedFounders[0]).toMatchObject({ name: "Jane Founder", category: "founder" });
+  });
+
+  it("does not re-persist founders for an already-known company", async () => {
+    const founder: NewPerson = { name: "Jane Founder", category: "founder" };
+    const jobAtCompany = (sourceJobId: string) => discoveredJob({ source_job_id: sourceJobId }, {}, [founder]);
+    const source = new FakeJobSource("fake-source", [jobAtCompany("1"), jobAtCompany("2")]);
+    const manager = new SourceManager(db, [source]);
+
+    await manager.runAll();
+
+    const company = companies.findByName("Acme Robotics")!;
+    const persistedFounders = people.list().filter((p) => p.company_id === company.id);
+    expect(persistedFounders).toHaveLength(1); // not duplicated for the second job at the same company
+  });
+
+  it("merges last_active from the cheap tier into enriched company data", async () => {
+    const cheap = discoveredJob({ source_job_id: "1" }, { last_active: "3 months ago" });
+    // Detail-tier data never carries last_active (see Decisions Log) —
+    // simulating that honestly rather than including it in the fixture.
+    const detailed = discoveredJob({ source_job_id: "1" }, { team_size: 20 });
+    const source = new FakeJobSource("fake-source", [cheap], { detailBySourceJobId: { "1": detailed } });
+    const manager = new SourceManager(db, [source]);
+
+    await manager.runAll();
+
+    const company = companies.findByName("Acme Robotics");
+    expect(company?.last_active).toBe("3 months ago");
+    expect(company?.team_size).toBe(20);
   });
 });

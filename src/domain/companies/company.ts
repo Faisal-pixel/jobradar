@@ -12,6 +12,9 @@ export interface Company {
   location: string | null;
   remote_policy: string | null;
   notes: string | null;
+  // Relative description as of discovery time (e.g. "4 months ago"), not
+  // a real timestamp — see migration 003_company_last_active.
+  last_active: string | null;
   created_at: string;
   updated_at: string;
 }

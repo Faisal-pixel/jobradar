@@ -5,10 +5,23 @@
 import { getDb, closeDb } from "../database/connection.js";
 import { ALL_MIGRATIONS, runMigrations } from "../database/migrations/index.js";
 import { CompaniesRepository } from "../database/repositories/companies-repository.js";
-import { JobsRepository } from "../database/repositories/jobs-repository.js";
+import { JobsRepository, type JobFilters } from "../database/repositories/jobs-repository.js";
 import { SourceHealthRepository } from "../database/repositories/source-health-repository.js";
+import { CandidateProfileRepository } from "../database/repositories/candidate-profile-repository.js";
 import { SourceManager } from "../services/job-discovery/source-manager.js";
+import { ScoringPipeline } from "../services/matching/scoring-pipeline.js";
 import { WorkAtAStartupSource } from "../sources/workatastartup/index.js";
+import type { JobStatus, JobFitCategory } from "../domain/jobs/job.js";
+
+function parseFlags(args: string[]): Record<string, string | true> {
+  const flags: Record<string, string | true> = {};
+  for (const arg of args) {
+    if (!arg.startsWith("--")) continue;
+    const [key, value] = arg.slice(2).split("=");
+    if (key) flags[key] = value ?? true;
+  }
+  return flags;
+}
 
 async function main(): Promise<void> {
   const [command, ...args] = process.argv.slice(2);
@@ -18,6 +31,7 @@ async function main(): Promise<void> {
   const companies = new CompaniesRepository(db);
   const jobs = new JobsRepository(db);
   const sourceHealth = new SourceHealthRepository(db);
+  const candidateProfile = new CandidateProfileRepository(db);
 
   switch (command) {
     case "insert-company": {
@@ -49,9 +63,30 @@ async function main(): Promise<void> {
       console.log(JSON.stringify(results, null, 2));
       break;
     }
+    case "score-jobs": {
+      const pipeline = new ScoringPipeline(db);
+      console.log(JSON.stringify(pipeline.run(), null, 2));
+      break;
+    }
+    case "get-profile": {
+      console.log(JSON.stringify(candidateProfile.get(), null, 2));
+      break;
+    }
+    case "search-jobs": {
+      const flags = parseFlags(args);
+      const filters: JobFilters = {};
+      if (typeof flags.status === "string") filters.status = flags.status as JobStatus;
+      if (typeof flags.fitCategory === "string") filters.fitCategory = flags.fitCategory as JobFitCategory;
+      if (typeof flags.minFitScore === "string") filters.minFitScore = Number(flags.minFitScore);
+      if (flags.remote) filters.remoteOnly = true;
+      console.log(JSON.stringify(jobs.findByFilters(filters), null, 2));
+      break;
+    }
     default: {
       console.error(
-        "Usage: cli <insert-company|list-companies|list-jobs|source-health|discover-jobs> [args]",
+        "Usage: cli <insert-company|list-companies|list-jobs|source-health|discover-jobs|" +
+          "score-jobs|get-profile|search-jobs> [args]\n" +
+          "  search-jobs --status=reviewed --fitCategory=A --minFitScore=70 --remote",
       );
       process.exitCode = 1;
     }

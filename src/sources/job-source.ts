@@ -1,14 +1,23 @@
 import type { NewJob } from "../domain/jobs/job.js";
 import type { NewCompany } from "../domain/companies/company.js";
+import type { NewPerson } from "../domain/people/person.js";
 
 // A job as an adapter reports it: paired with the company data needed to
 // resolve/create companies.company_id. Adapters never touch SQLite, so
 // they can't know DB-assigned fields (id, created_at, updated_at) before
 // a row exists — this is CLAUDE.md's sketched `Job[]` return narrowed to
 // the pre-insert NewJob/NewCompany shapes from Phase 1.
+//
+// `founders` belongs to the company, not the job specifically — it's
+// optional and only ever populated when the adapter's data actually
+// includes real founder info (name/LinkedIn), never fabricated. Only
+// attached to the company the first time SourceManager creates it (see
+// SourceManager's company-reuse comment) — not backfilled onto an
+// already-known company.
 export interface DiscoveredJob {
   job: NewJob;
   company: NewCompany;
+  founders?: NewPerson[];
 }
 
 // A lightweight, adapter-computed "can I reach the site right now" check.

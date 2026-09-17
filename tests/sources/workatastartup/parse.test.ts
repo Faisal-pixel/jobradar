@@ -94,6 +94,7 @@ describe("normalizeSearchJob (real fixture: search-response.json)", () => {
     expect(discovered.job.description).toBeNull();
     expect(discovered.company.name).toBe("Nango");
     expect(discovered.company.yc_batch).toBe("W23");
+    expect(discovered.company.last_active).toBe("10 months ago");
   });
 });
 
@@ -121,5 +122,23 @@ describe("extractInertiaPageProps + normalizeJobDetail (real fixture: job-detail
     expect(discovered.company.website).toBe("http://www.bymason.com");
     expect(discovered.company.domain).toBe("bymason.com");
     expect(discovered.company.team_size).toBe(65);
+    // last_active is search-tier-only — normalizeJobDetail alone can't
+    // know it; SourceManager.enrich() is what merges it in.
+    expect(discovered.company.last_active).toBeUndefined();
+  });
+
+  it("normalizes real founder data (name + LinkedIn), not fabricated", () => {
+    const discovered = normalizeJobDetail(props.job, props.company, props.applyUrl);
+
+    expect(discovered.founders).toEqual([
+      expect.objectContaining({
+        name: "Jim Xiao",
+        category: "founder",
+        linkedin_url: "https://www.linkedin.com/in/jimxiao",
+        source: "workatastartup",
+        source_url: "https://www.workatastartup.com/jobs/13302",
+      }),
+    ]);
+    expect(discovered.founders?.[0]?.notes).toContain("Past experience at Microsoft");
   });
 });

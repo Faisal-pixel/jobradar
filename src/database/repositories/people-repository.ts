@@ -38,6 +38,11 @@ export class PeopleRepository {
     return rows as unknown as Person[];
   }
 
+  findByCompany(companyId: number): Person[] {
+    const rows = this.db.prepare("SELECT * FROM people WHERE company_id = ? ORDER BY id").all(companyId);
+    return rows as unknown as Person[];
+  }
+
   update(id: number, patch: PersonPatch): Person {
     const existing = this.findById(id);
     if (!existing) throw new NotFoundError("Person", id);

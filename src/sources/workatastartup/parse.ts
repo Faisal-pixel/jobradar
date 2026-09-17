@@ -1,8 +1,9 @@
 import * as cheerio from "cheerio";
 import type { NewJob } from "../../domain/jobs/job.js";
 import type { NewCompany } from "../../domain/companies/company.js";
+import type { NewPerson } from "../../domain/people/person.js";
 import type { DiscoveredJob } from "../job-source.js";
-import type { WaasSearchJob, WaasJobDetail, WaasCompanyDetail } from "./types.js";
+import type { WaasSearchJob, WaasJobDetail, WaasCompanyDetail, WaasFounder } from "./types.js";
 
 export const SOURCE_NAME = "workatastartup";
 
@@ -121,9 +122,28 @@ export function normalizeSearchJob(raw: WaasSearchJob): DiscoveredJob {
     name: raw.companyName,
     yc_batch: raw.companyBatch ?? null,
     description: raw.companyOneLiner ?? null,
+    // Only available on this cheap tier, not the detail page — see
+    // SourceManager.enrich(), which merges this across tiers rather
+    // than letting detail-tier enrichment silently drop it.
+    last_active: raw.companyLastActiveAt ?? null,
   };
 
   return { job, company };
+}
+
+function normalizeFounder(founder: WaasFounder, sourceUrl: string): NewPerson {
+  const notes = [founder.bio, founder.pastCompanies ? `Past: ${founder.pastCompanies}` : null]
+    .filter((part): part is string => Boolean(part))
+    .join("\n\n");
+
+  return {
+    name: founder.name,
+    category: "founder",
+    linkedin_url: founder.linkedin ?? null,
+    source: SOURCE_NAME,
+    source_url: sourceUrl,
+    notes: notes || null,
+  };
 }
 
 // Rich tier: normalizes a /jobs/{id} detail-page payload (job + company
@@ -163,5 +183,7 @@ export function normalizeJobDetail(
     location: company.location ?? null,
   };
 
-  return { job, company: newCompany };
+  const founders = company.founders?.map((founder) => normalizeFounder(founder, jobUrl(detail.id))) ?? [];
+
+  return { job, company: newCompany, founders };
 }

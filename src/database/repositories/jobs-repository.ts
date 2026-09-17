@@ -1,6 +1,13 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { Job, NewJob, JobPatch } from "../../domain/jobs/job.js";
+import type { Job, NewJob, JobPatch, JobStatus, JobFitCategory } from "../../domain/jobs/job.js";
 import { NotFoundError, ValidationError } from "../../shared/errors.js";
+
+export interface JobFilters {
+  status?: JobStatus;
+  fitCategory?: JobFitCategory;
+  minFitScore?: number;
+  remoteOnly?: boolean;
+}
 
 // SQLite has no boolean type; `remote` is stored as an INTEGER 0/1/NULL
 // and converted at the repository boundary so nothing above this layer
@@ -82,6 +89,35 @@ export class JobsRepository {
 
   list(): Job[] {
     const rows = this.db.prepare("SELECT * FROM jobs ORDER BY id").all();
+    return rows.map(mapRow);
+  }
+
+  // Query-time filtering (Phase 3 decision: filtering is a separate
+  // capability layered on top of already-scored jobs, never a
+  // pre-scoring gate — see CLAUDE.md Decisions Log). This is what a
+  // future `search_jobs` MCP tool (Phase 7) will wrap.
+  findByFilters(filters: JobFilters): Job[] {
+    const clauses: string[] = [];
+    const values: (string | number)[] = [];
+
+    if (filters.status) {
+      clauses.push("status = ?");
+      values.push(filters.status);
+    }
+    if (filters.fitCategory) {
+      clauses.push("fit_category = ?");
+      values.push(filters.fitCategory);
+    }
+    if (filters.minFitScore !== undefined) {
+      clauses.push("fit_score >= ?");
+      values.push(filters.minFitScore);
+    }
+    if (filters.remoteOnly) {
+      clauses.push("remote = 1");
+    }
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    const rows = this.db.prepare(`SELECT * FROM jobs ${where} ORDER BY fit_score DESC, id`).all(...values);
     return rows.map(mapRow);
   }
 

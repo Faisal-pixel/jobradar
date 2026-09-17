@@ -59,4 +59,36 @@ describe("JobsRepository", () => {
       }),
     ).toThrow();
   });
+
+  describe("findByFilters", () => {
+    beforeEach(() => {
+      repo.create({ title: "A", source: "yc", source_job_id: "1", status: "new", remote: true, fit_score: 90, fit_category: "A" });
+      repo.create({ title: "B", source: "yc", source_job_id: "2", status: "reviewed", remote: false, fit_score: 50, fit_category: "skip" });
+      repo.create({ title: "C", source: "yc", source_job_id: "3", status: "reviewed", remote: true, fit_score: 70, fit_category: "B" });
+    });
+
+    it("filters by status", () => {
+      expect(repo.findByFilters({ status: "reviewed" })).toHaveLength(2);
+    });
+
+    it("filters by fitCategory", () => {
+      expect(repo.findByFilters({ fitCategory: "B" }).map((j) => j.title)).toEqual(["C"]);
+    });
+
+    it("filters by minFitScore", () => {
+      expect(repo.findByFilters({ minFitScore: 70 }).map((j) => j.title).sort()).toEqual(["A", "C"]);
+    });
+
+    it("filters by remoteOnly", () => {
+      expect(repo.findByFilters({ remoteOnly: true }).map((j) => j.title).sort()).toEqual(["A", "C"]);
+    });
+
+    it("combines filters with AND semantics", () => {
+      expect(repo.findByFilters({ status: "reviewed", remoteOnly: true }).map((j) => j.title)).toEqual(["C"]);
+    });
+
+    it("returns everything, ordered by fit_score desc, when no filters are given", () => {
+      expect(repo.findByFilters({}).map((j) => j.title)).toEqual(["A", "C", "B"]);
+    });
+  });
 });
