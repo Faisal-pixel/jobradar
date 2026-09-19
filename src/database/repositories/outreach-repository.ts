@@ -1,6 +1,13 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { Outreach, NewOutreach, OutreachPatch } from "../../domain/outreach/outreach.js";
+import type { Outreach, NewOutreach, OutreachPatch, OutreachStatus } from "../../domain/outreach/outreach.js";
 import { NotFoundError, ValidationError } from "../../shared/errors.js";
+
+export interface OutreachFilters {
+  status?: OutreachStatus;
+  jobId?: number;
+  companyId?: number;
+  personId?: number;
+}
 
 export class OutreachRepository {
   constructor(private readonly db: DatabaseSync) {}
@@ -35,6 +42,33 @@ export class OutreachRepository {
 
   list(): Outreach[] {
     const rows = this.db.prepare("SELECT * FROM outreach ORDER BY id").all();
+    return rows as unknown as Outreach[];
+  }
+
+  // Query-time filtering, same pattern as JobsRepository.findByFilters.
+  findByFilters(filters: OutreachFilters): Outreach[] {
+    const clauses: string[] = [];
+    const values: (string | number)[] = [];
+
+    if (filters.status) {
+      clauses.push("status = ?");
+      values.push(filters.status);
+    }
+    if (filters.jobId !== undefined) {
+      clauses.push("job_id = ?");
+      values.push(filters.jobId);
+    }
+    if (filters.companyId !== undefined) {
+      clauses.push("company_id = ?");
+      values.push(filters.companyId);
+    }
+    if (filters.personId !== undefined) {
+      clauses.push("person_id = ?");
+      values.push(filters.personId);
+    }
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    const rows = this.db.prepare(`SELECT * FROM outreach ${where} ORDER BY id`).all(...values);
     return rows as unknown as Outreach[];
   }
 

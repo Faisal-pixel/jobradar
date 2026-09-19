@@ -22,6 +22,12 @@ import { TEST_NOTIFICATION_MESSAGE } from "../services/notifications/templates.j
 import { JobAlertsService } from "../services/notifications/job-alerts.js";
 import { DailyDigestService } from "../services/notifications/daily-digest.js";
 import { FollowUpAlertsService } from "../services/notifications/follow-up-alerts.js";
+import { ApplicationsRepository, type ApplicationFilters } from "../database/repositories/applications-repository.js";
+import { OutreachRepository, type OutreachFilters } from "../database/repositories/outreach-repository.js";
+import { ApplicationService } from "../services/applications/application-service.js";
+import { OutreachService } from "../services/outreach/outreach-service.js";
+import type { ApplicationStatus } from "../domain/applications/application.js";
+import type { OutreachChannel, OutreachStatus } from "../domain/outreach/outreach.js";
 
 function requireTelegramClient(): TelegramClient | null {
   if (!env.TELEGRAM_BOT_TOKEN || !env.TELEGRAM_CHAT_ID) {
@@ -55,6 +61,8 @@ async function main(): Promise<void> {
   const sourceHealth = new SourceHealthRepository(db);
   const candidateProfile = new CandidateProfileRepository(db);
   const sheetSyncStatus = new SheetSyncStatusRepository(db);
+  const applications = new ApplicationsRepository(db);
+  const outreach = new OutreachRepository(db);
 
   switch (command) {
     case "insert-company": {
@@ -172,11 +180,118 @@ async function main(): Promise<void> {
       console.log("Set TELEGRAM_CHAT_ID to the right one above (usually there's only one).");
       break;
     }
+    case "log-application": {
+      const flags = parseFlags(args);
+      if (typeof flags.job !== "string" && typeof flags.company !== "string") {
+        console.error("Usage: cli log-application --job=<id> [--company=<id>] [--status=planned] [--role=...] [--notes=...]");
+        process.exitCode = 1;
+        break;
+      }
+      const service = new ApplicationService(db);
+      const application = service.logApplication({
+        job_id: typeof flags.job === "string" ? Number(flags.job) : null,
+        company_id: typeof flags.company === "string" ? Number(flags.company) : null,
+        role: typeof flags.role === "string" ? flags.role : null,
+        application_url: typeof flags.applicationUrl === "string" ? flags.applicationUrl : null,
+        date_applied: typeof flags.dateApplied === "string" ? flags.dateApplied : null,
+        notes: typeof flags.notes === "string" ? flags.notes : null,
+        ...(typeof flags.status === "string" ? { status: flags.status as ApplicationStatus } : {}),
+      });
+      console.log(JSON.stringify(application, null, 2));
+      break;
+    }
+    case "update-application": {
+      const id = Number(args[0]);
+      const flags = parseFlags(args.slice(1));
+      if (!id) {
+        console.error(
+          "Usage: cli update-application <id> --status=<status> [--interviewStage=...] " +
+            "[--rejectionReason=...] [--dateApplied=...] [--notes=...]",
+        );
+        process.exitCode = 1;
+        break;
+      }
+      const service = new ApplicationService(db);
+      const application = service.updateApplicationStatus(id, {
+        ...(typeof flags.status === "string" ? { status: flags.status as ApplicationStatus } : {}),
+        ...(typeof flags.interviewStage === "string" ? { interview_stage: flags.interviewStage } : {}),
+        ...(typeof flags.rejectionReason === "string" ? { rejection_reason: flags.rejectionReason } : {}),
+        ...(typeof flags.dateApplied === "string" ? { date_applied: flags.dateApplied } : {}),
+        ...(typeof flags.notes === "string" ? { notes: flags.notes } : {}),
+      });
+      console.log(JSON.stringify(application, null, 2));
+      break;
+    }
+    case "list-applications": {
+      const flags = parseFlags(args);
+      const filters: ApplicationFilters = {};
+      if (typeof flags.status === "string") filters.status = flags.status as ApplicationStatus;
+      if (typeof flags.jobId === "string") filters.jobId = Number(flags.jobId);
+      if (typeof flags.companyId === "string") filters.companyId = Number(flags.companyId);
+      console.log(JSON.stringify(applications.findByFilters(filters), null, 2));
+      break;
+    }
+    case "log-outreach": {
+      const flags = parseFlags(args);
+      if (typeof flags.company !== "string" && typeof flags.person !== "string" && typeof flags.job !== "string") {
+        console.error(
+          "Usage: cli log-outreach [--company=<id>] [--person=<id>] [--job=<id>] " +
+            "[--channel=linkedin] [--status=contacted] [--followUpDate=YYYY-MM-DD] [--notes=...]",
+        );
+        process.exitCode = 1;
+        break;
+      }
+      const service = new OutreachService(db);
+      const contact = service.logOutreach({
+        company_id: typeof flags.company === "string" ? Number(flags.company) : null,
+        person_id: typeof flags.person === "string" ? Number(flags.person) : null,
+        job_id: typeof flags.job === "string" ? Number(flags.job) : null,
+        channel: typeof flags.channel === "string" ? (flags.channel as OutreachChannel) : null,
+        date_contacted: typeof flags.dateContacted === "string" ? flags.dateContacted : null,
+        follow_up_date: typeof flags.followUpDate === "string" ? flags.followUpDate : null,
+        notes: typeof flags.notes === "string" ? flags.notes : null,
+        ...(typeof flags.status === "string" ? { status: flags.status as OutreachStatus } : {}),
+      });
+      console.log(JSON.stringify(contact, null, 2));
+      break;
+    }
+    case "update-outreach": {
+      const id = Number(args[0]);
+      const flags = parseFlags(args.slice(1));
+      if (!id) {
+        console.error(
+          "Usage: cli update-outreach <id> [--status=...] [--followUpDate=...] [--response=...] [--notes=...]",
+        );
+        process.exitCode = 1;
+        break;
+      }
+      const service = new OutreachService(db);
+      const contact = service.updateOutreach(id, {
+        ...(typeof flags.status === "string" ? { status: flags.status as OutreachStatus } : {}),
+        ...(typeof flags.followUpDate === "string" ? { follow_up_date: flags.followUpDate } : {}),
+        ...(typeof flags.response === "string" ? { response: flags.response } : {}),
+        ...(typeof flags.dateContacted === "string" ? { date_contacted: flags.dateContacted } : {}),
+        ...(typeof flags.notes === "string" ? { notes: flags.notes } : {}),
+      });
+      console.log(JSON.stringify(contact, null, 2));
+      break;
+    }
+    case "list-outreach": {
+      const flags = parseFlags(args);
+      const filters: OutreachFilters = {};
+      if (typeof flags.status === "string") filters.status = flags.status as OutreachStatus;
+      if (typeof flags.jobId === "string") filters.jobId = Number(flags.jobId);
+      if (typeof flags.companyId === "string") filters.companyId = Number(flags.companyId);
+      if (typeof flags.personId === "string") filters.personId = Number(flags.personId);
+      console.log(JSON.stringify(outreach.findByFilters(filters), null, 2));
+      break;
+    }
     default: {
       console.error(
         "Usage: cli <insert-company|list-companies|list-jobs|source-health|discover-jobs|" +
           "score-jobs|get-profile|search-jobs|sync-sheets|sheet-status|send-test|send-alerts|" +
-          "send-digest|send-followups|get-telegram-chat-id> [args]\n" +
+          "send-digest|send-followups|get-telegram-chat-id|log-application|update-application|" +
+          "list-applications|log-outreach|update-outreach|list-outreach> [args]\n" +
           "  search-jobs --status=reviewed --fitCategory=A --minFitScore=70 --remote",
       );
       process.exitCode = 1;
