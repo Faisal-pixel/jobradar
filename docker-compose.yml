@@ -16,7 +16,7 @@ services:
       # google-token.json exists here, containerized runs reuse it with
       # no browser involved.
       - ./credentials:/app/credentials
-    # No ports published yet — the MCP server (Streamable HTTP, localhost-only)
-    # is built in Phase 7. It will add something like:
-    #   ports:
-    #     - "127.0.0.1:3939:3939"
+    ports:
+      # Streamable HTTP MCP server (Decision #4) — published to 127.0.0.1
+      # only, never 0.0.0.0, matching the server's own bind-host restriction.
+      - "127.0.0.1:3939:3939"

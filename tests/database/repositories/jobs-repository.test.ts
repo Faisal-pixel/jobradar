@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import type { DatabaseSync } from "node:sqlite";
 import { createTestDb } from "../../test-helpers/create-test-db.js";
 import { JobsRepository } from "../../../src/database/repositories/jobs-repository.js";
+import { CompaniesRepository } from "../../../src/database/repositories/companies-repository.js";
 
 describe("JobsRepository", () => {
   let db: DatabaseSync;
@@ -89,6 +90,16 @@ describe("JobsRepository", () => {
 
     it("returns everything, ordered by fit_score desc, when no filters are given", () => {
       expect(repo.findByFilters({}).map((j) => j.title)).toEqual(["A", "C", "B"]);
+    });
+
+    it("filters by companyId (Phase 7: get_company_jobs)", () => {
+      const companies = new CompaniesRepository(db);
+      const companyA = companies.create({ name: "Acme" });
+      const companyB = companies.create({ name: "Widgets Inc" });
+      repo.create({ title: "D", source: "yc", source_job_id: "4", company_id: companyA.id });
+      repo.create({ title: "E", source: "yc", source_job_id: "5", company_id: companyB.id });
+
+      expect(repo.findByFilters({ companyId: companyA.id }).map((j) => j.title)).toEqual(["D"]);
     });
   });
 });

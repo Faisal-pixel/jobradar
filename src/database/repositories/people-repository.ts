@@ -1,6 +1,11 @@
 import type { DatabaseSync } from "node:sqlite";
-import type { Person, NewPerson, PersonPatch } from "../../domain/people/person.js";
+import type { Person, NewPerson, PersonPatch, PersonCategory } from "../../domain/people/person.js";
 import { NotFoundError, ValidationError } from "../../shared/errors.js";
+
+export interface PersonFilters {
+  name?: string;
+  category?: PersonCategory;
+}
 
 export class PeopleRepository {
   constructor(private readonly db: DatabaseSync) {}
@@ -40,6 +45,26 @@ export class PeopleRepository {
 
   findByCompany(companyId: number): Person[] {
     const rows = this.db.prepare("SELECT * FROM people WHERE company_id = ? ORDER BY id").all(companyId);
+    return rows as unknown as Person[];
+  }
+
+  // find_people (Phase 7): name is a partial, case-insensitive match
+  // (e.g. "jane" matches "Jane Founder"); category is an exact match.
+  findByFilters(filters: PersonFilters): Person[] {
+    const clauses: string[] = [];
+    const values: string[] = [];
+
+    if (filters.name) {
+      clauses.push("LOWER(name) LIKE ?");
+      values.push(`%${filters.name.toLowerCase()}%`);
+    }
+    if (filters.category) {
+      clauses.push("category = ?");
+      values.push(filters.category);
+    }
+
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    const rows = this.db.prepare(`SELECT * FROM people ${where} ORDER BY id`).all(...values);
     return rows as unknown as Person[];
   }
 

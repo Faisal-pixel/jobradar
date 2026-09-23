@@ -141,6 +141,23 @@ Tool vs. resource: a **tool** does something (`get_candidate_profile()`); a **re
 
 The full 70+ tool capability catalog was scoped in planning but is **not** all built at once — see Phases below.
 
+### Connecting Claude Desktop (Phase 7, Decision #49)
+
+The server itself is plain Streamable HTTP, bound to `127.0.0.1:3939` (`http://127.0.0.1:3939/mcp`) — that never changes. Claude Desktop's `claude_desktop_config.json` cannot point at a local Streamable HTTP URL directly, so it spawns the community-standard `mcp-remote` bridge as a stdio subprocess instead, which itself speaks Streamable HTTP to the real server:
+
+```json
+{
+  "mcpServers": {
+    "jobradar": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "http://127.0.0.1:3939/mcp"]
+    }
+  }
+}
+```
+
+Add this block to `claude_desktop_config.json` (Claude menu → Settings → Developer → Edit Config), then fully restart Claude Desktop. Prerequisite: `docker compose up` must already be running so something is listening on `127.0.0.1:3939` — `mcp-remote` has nothing to bridge to otherwise. No config changes needed if the server's port ever changes via `MCP_PORT` — just update the URL in `args`.
+
 ## Development Phases
 
 Build in order. Do not jump ahead. Each phase ends with a report (format below) and waits for explicit go-ahead before the next one starts.
@@ -162,7 +179,7 @@ Build in order. Do not jump ahead. Each phase ends with a report (format below) 
 | 12 | Long-Running Tasks | "Research 30 companies" as a trackable background task (MCP Tasks extension), not a blocking call. |
 | 13 | Future Sources | LinkedIn, HN Who's Hiring, Wellfound, Greenhouse, Lever, career pages — one at a time, same adapter interface. |
 
-**Current phase: 6 — Application + Outreach Pipeline, in progress.** Update this line as we progress.
+**Current phase: 7 — MCP Server, complete.** Update this line as we progress.
 
 ## Decisions Log
 
@@ -231,6 +248,32 @@ Decisions made during Phase 6 investigation, approved 2026-09-19.
 46. **Six new CLI commands** (`log-application`, `update-application`, `list-applications`, `log-outreach`, `update-outreach`, `list-outreach`), same flag-parsing pattern as every prior phase's commands. `log-application` requires at least one of `--job`/`--company`; when only `--job` is given, `company_id` is auto-derived from the job (but never overrides an explicit `--company`, since an Application can legitimately exist for a job JobRadar never discovered). `log-outreach` requires at least one of `--company`/`--person`/`--job`.
 47. **Connects to Phase 5 with zero code changes there.** `send-followups` already queried `OutreachRepository.findDueFollowUps()` — it simply had nothing to find because nothing ever created an Outreach row. The moment `log-outreach` runs, follow-up alerts start working on real data.
 48. **`OutreachService.logOutreach` now also auto-derives `company_id` from `job_id`** when only `--job` is given, never overriding an explicit `--company` — same pattern `ApplicationService.logApplication` already had. Originally left out of Phase 6's first pass (flagged as a known limitation in that phase's completion report: `log-outreach --job=1` alone left `company_id` null, so a follow-up alert for it read "Follow-up due: Unknown company"). Added on request immediately after, before the Phase 6 commit.
+
+Decisions made during Phase 7 investigation and build, approved 2026-09-23.
+
+49. **Corrected Decision #4, discovered before building anything: Claude Desktop's `claude_desktop_config.json` cannot point at a local Streamable HTTP URL directly**, and Claude.ai's Custom Connectors require public-internet reachability (localhost excluded) — confirmed via two independent research passes against official docs, not assumed. Decision #4's spirit (persistent Streamable HTTP service, not stdio via `docker exec`) stays intact; the fix is to also spawn the community-standard `mcp-remote` npm package as a stdio↔HTTP bridge from `claude_desktop_config.json`, so Desktop talks stdio to `mcp-remote`, which talks Streamable HTTP to the real server:
+    ```json
+    {
+      "mcpServers": {
+        "jobradar": {
+          "command": "npx",
+          "args": ["-y", "mcp-remote", "http://127.0.0.1:3939/mcp"]
+        }
+      }
+    }
+    ```
+    No changes to the server itself — it stays plain Streamable HTTP, bound to `127.0.0.1`, exactly as Decision #4 already specified.
+50. **MCP TypeScript SDK v2's split packages**: `@modelcontextprotocol/server` (`McpServer`, `registerTool`, `createMcpHandler`), `@modelcontextprotocol/node` (`toNodeHandler`, adapts the web-standard handler to Express/Node), `@modelcontextprotocol/express` (`createMcpExpressApp`, pre-wired DNS-rebinding/Origin protection when bound to localhost — verified live via a spoofed-`Host`-header curl request that correctly got HTTP 403). `@modelcontextprotocol/client` is dev-only (tests use it to drive the server over a real in-memory transport). Confirmed all at stable `2.0.0`, and confirmed exact signatures by reading the installed `.d.mts` files directly rather than trusting docs/memory.
+51. **Layering relaxation, deliberate and scoped**: MCP tool handlers call repositories directly for logic-free reads/writes (`search_jobs`, `get_job`, `get_company`, `find_people`, `save_person`, `list_applications`, `list_pending_outreach`, `get_source_status`, `get_sheet_status`, …) — mirroring the CLI's established precedent every prior phase already set. Handlers go through an actual service only where real orchestration/business logic already lives: `ApplicationService` (Decision #42's status-sync), `OutreachService`, `ScoringPipeline`, `SheetsSyncService`, `SourceManager`, and the new `SystemHealthService`. CLAUDE.md's layering diagram is honored in spirit (MCP never contains business logic, never writes raw SQL) without inventing a placeholder service class for every single-line repository call.
+52. **`score_job(job_id)`: new orchestration method on `ScoringPipeline`, reusing Phase 3's `scoreJob()` math — no new scoring logic.** Only advances `Job.status` from `'new'` to `'reviewed'`; never regresses a job that's already progressed further (e.g. to `'applied'` via Decision #42's Application-status sync) — re-scoring refreshes the fit fields but leaves a later status untouched. Throws `NotFoundError` for an unknown job id, caught and returned as a tool-level error rather than crashing the protocol connection.
+53. **`get_candidate_profile` and `get_job_search_preferences` are two separate MCP tools that both read the same `candidate_profile` row.** CLAUDE.md names both in its tool list even though nothing currently distinguishes their outputs — kept separate rather than collapsed into one, since a future phase may split "identity" fields (location, target titles) from "preferences" fields (weights, thresholds) into genuinely different views.
+54. **`get_system_health`/`get_errors`: a narrow rollup for now**, aggregating just `source_health` (Decision #15) and `sheet_sync_status` (Decision #29) — the only two persisted health tables that exist. No Telegram entry, consistent with Decision #36 (no persisted Telegram health table by design). `get_errors` filters both tables down to non-null `last_error` rows only. Expected to broaden once Phase 10's scheduler exists and there's more to aggregate.
+55. **`list_pending_outreach` wraps `OutreachRepository.findDueFollowUps()` specifically** — the same strictly-overdue-or-due-today, still-open query Phase 5's automated follow-up alerts already use (Decision #35) — not a general status filter. `update_application` stays fully flexible with no new validation, per Decision #44 unchanged.
+56. **`get_company_jobs` needed a `companyId` filter added to `JobsRepository.findByFilters`; `find_people` needed a new `PeopleRepository.findByFilters`** (case-insensitive partial name match, exact category match, AND-combined) — both small, additive repository changes, not new business logic. `PeopleRepository` had no dedicated test file before this phase despite having CRUD since Phase 1 (same gap Decision #41 found for Applications/Outreach); added one now, mirroring the existing repository test pattern.
+57. **`omitUndefined<T>()` helper added to `src/mcp/tool-helpers.ts`**, fixing a recurring `exactOptionalPropertyTypes` failure: Zod's parsed tool-input objects always include every optional key (as `key: undefined`) rather than omitting it, which `Partial<T>`-typed repository/service methods reject under this project's strict tsconfig. A first attempt that only stripped keys at runtime didn't satisfy the type checker; the fix needed a mapped return type (`{ [K in keyof T]: Exclude<T[K], undefined> }`) so TypeScript itself knows every field is no longer possibly-`undefined`.
+58. **Explicitly skipped this phase**: `research_company`, `research_company_people`, `research_job` (Phase 9 — Advanced Research), `get_automation_status`, `run_now` (Phase 10 — no scheduler exists yet), and a dedicated `explain_job_score` tool (`fit_explanation` already comes back on `get_job`; a separate tool would just duplicate it, not add capability).
+59. **Resources and prompts deferred to Phase 11 in full**, resolving an apparent tension in CLAUDE.md's own text (it uses `get_candidate_profile()` as its illustrative *tool* example while also listing `candidate://profile` as a *resource* example in the same section). Everything Phase 7 names as a tool is built as a tool now; converting any of them to resources is left as a Phase 11 decision, not made implicitly here.
+60. **`MCP_PORT` added to `env.ts` (default `3939`), but the bind host stays hardcoded `127.0.0.1` in `server.ts`, not env-configurable** — consistent with Decision #4's security posture; only the port is a legitimate per-environment knob. `docker-compose.yml` publishes `127.0.0.1:3939:3939`, never `0.0.0.0`, matching the server's own restriction. The Phase 1 heartbeat placeholder in `src/app/index.ts` is now the real MCP server as the persistent foreground process (Decision #5's one-combined-container topology unchanged).
 
 ## Development Rules (non-negotiable)
 

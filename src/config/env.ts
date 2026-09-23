@@ -38,6 +38,10 @@ const envSchema = z.object({
   // real "is this configured" check and fail clearly if not.
   TELEGRAM_BOT_TOKEN: optionalEnvString(),
   TELEGRAM_CHAT_ID: optionalEnvString(),
+  // MCP server (Phase 7). Port is configurable; the bind host is not —
+  // Decision #4 fixes it to 127.0.0.1, not something to make accidentally
+  // overridable to 0.0.0.0 via an env var.
+  MCP_PORT: z.coerce.number().default(3939),
 });
 
 export type Env = z.infer<typeof envSchema>;

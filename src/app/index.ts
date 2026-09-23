@@ -2,6 +2,7 @@ import { env } from "../config/env.js";
 import { logger } from "../shared/logger.js";
 import { getDb, closeDb } from "../database/connection.js";
 import { ALL_MIGRATIONS, runMigrations } from "../database/migrations/index.js";
+import { startMcpServer } from "../mcp/server.js";
 
 function main(): void {
   logger.info("JobRadar starting", { env: env.NODE_ENV, dbPath: env.DB_PATH });
@@ -9,21 +10,22 @@ function main(): void {
   const db = getDb();
   runMigrations(db, ALL_MIGRATIONS);
 
-  logger.info("JobRadar foundation ready — no scheduler or MCP server yet (later phases)");
+  // Decisions #4/#5: the MCP server is the persistent process keeping
+  // this container alive — Streamable HTTP, bound to 127.0.0.1 only, no
+  // scheduler yet (Phase 10). Replaces Phase 1's heartbeat placeholder.
+  const mcpServer = startMcpServer(db);
 
-  // Phase 1 has no scheduler or MCP server to keep the process alive, but a
-  // Docker container needs a running foreground process. This heartbeat is
-  // a placeholder that later phases replace with real scheduled work / an
-  // HTTP listener.
-  const heartbeat = setInterval(() => {
-    logger.debug("heartbeat");
-  }, 60_000);
+  logger.info("JobRadar ready — MCP server running, no scheduler yet (Phase 10)");
 
   const shutdown = (signal: string) => {
     logger.info("Shutting down", { signal });
-    clearInterval(heartbeat);
-    closeDb();
-    process.exit(0);
+    mcpServer
+      .close()
+      .catch((error: unknown) => logger.error("Error closing MCP server", { error: String(error) }))
+      .finally(() => {
+        closeDb();
+        process.exit(0);
+      });
   };
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));

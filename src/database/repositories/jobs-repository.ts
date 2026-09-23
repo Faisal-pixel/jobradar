@@ -7,6 +7,7 @@ export interface JobFilters {
   fitCategory?: JobFitCategory;
   minFitScore?: number;
   remoteOnly?: boolean;
+  companyId?: number;
 }
 
 // SQLite has no boolean type; `remote` is stored as an INTEGER 0/1/NULL
@@ -114,6 +115,10 @@ export class JobsRepository {
     }
     if (filters.remoteOnly) {
       clauses.push("remote = 1");
+    }
+    if (filters.companyId !== undefined) {
+      clauses.push("company_id = ?");
+      values.push(filters.companyId);
     }
 
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
