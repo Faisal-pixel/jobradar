@@ -38,10 +38,18 @@ const envSchema = z.object({
   // real "is this configured" check and fail clearly if not.
   TELEGRAM_BOT_TOKEN: optionalEnvString(),
   TELEGRAM_CHAT_ID: optionalEnvString(),
-  // MCP server (Phase 7). Port is configurable; the bind host is not —
-  // Decision #4 fixes it to 127.0.0.1, not something to make accidentally
-  // overridable to 0.0.0.0 via an env var.
+  // MCP server (Phase 7/8). Port is configurable. The bind host is now
+  // configurable too (Decision #61 corrects Decision #60): binding
+  // 127.0.0.1 *inside* the Docker container makes it unreachable via
+  // docker-compose's own port-publishing, since published-port traffic
+  // arrives over the container's bridge interface, not loopback. Local
+  // (non-Docker) runs default to 127.0.0.1 — tightest option, matches
+  // Decision #4's original intent. docker-compose.yml sets this to
+  // 0.0.0.0 explicitly; the "never reachable off this machine" guarantee
+  // comes from docker-compose.yml's `127.0.0.1:3939:3939` host-side
+  // mapping instead, not from the container's own bind address.
   MCP_PORT: z.coerce.number().default(3939),
+  MCP_HOST: z.string().min(1).default("127.0.0.1"),
 });
 
 export type Env = z.infer<typeof envSchema>;

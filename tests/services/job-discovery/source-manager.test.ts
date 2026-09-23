@@ -182,6 +182,48 @@ describe("SourceManager", () => {
     expect(persistedFounders).toHaveLength(1); // not duplicated for the second job at the same company
   });
 
+  it("re-checks dedup after enrichment, when the detail page reports a different source_job_id than expected (Phase 8, found live)", async () => {
+    // Candidate is fetched/checked under id "1"; the detail page's own
+    // payload reports id "2" instead — enrich() trusts the detail page,
+    // so the id actually persisted differs from the one dedup-checked
+    // before the fetch. "2" already exists in the DB.
+    await new SourceManager(db, [
+      new FakeJobSource("fake-source", [discoveredJob({ source_job_id: "2" })]),
+    ]).runAll();
+    expect(jobs.list()).toHaveLength(1);
+
+    const mismatched = discoveredJob({ source_job_id: "1" });
+    const detailReportsDifferentId = discoveredJob({ source_job_id: "2", description: "detail page payload" });
+    const source = new FakeJobSource("fake-source", [mismatched], {
+      detailBySourceJobId: { "1": detailReportsDifferentId },
+    });
+    const manager = new SourceManager(db, [source]);
+
+    const [result] = await manager.runAll();
+
+    expect(result).toMatchObject({ jobsCreated: 0, jobsSkipped: 1, jobsFailed: 0 });
+    expect(jobs.list()).toHaveLength(1); // no duplicate row, no crash
+  });
+
+  it("isolates a per-candidate processing error — other candidates in the same source still persist, and the run reports accurate counts", async () => {
+    const good1 = discoveredJob({ source_job_id: "1" }, { name: "Company A" });
+    // @ts-expect-error deliberately invalid to trigger a real DB CHECK
+    // constraint violation inside persist() -> jobs.create(), the same
+    // kind of uncaught-error-mid-loop this test guards against (found
+    // live via a source_job_id mismatch, reproduced here more simply).
+    const bad = discoveredJob({ source_job_id: "2", status: "not_a_real_status" }, { name: "Company B" });
+    const good2 = discoveredJob({ source_job_id: "3" }, { name: "Company C" });
+    const source = new FakeJobSource("fake-source", [good1, bad, good2]);
+    const manager = new SourceManager(db, [source]);
+
+    const [result] = await manager.runAll();
+
+    expect(result).toMatchObject({ ok: true, jobsFound: 3, jobsCreated: 2, jobsSkipped: 0, jobsFailed: 1 });
+    expect(jobs.list()).toHaveLength(2); // the two good candidates are NOT lost
+    const health = sourceHealth.get("fake-source");
+    expect(health?.status).toBe("healthy"); // the source itself completed; only one candidate failed
+  });
+
   it("merges last_active from the cheap tier into enriched company data", async () => {
     const cheap = discoveredJob({ source_job_id: "1" }, { last_active: "3 months ago" });
     // Detail-tier data never carries last_active (see Decisions Log) —

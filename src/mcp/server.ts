@@ -15,10 +15,18 @@ import { registerSourceTools } from "./tools/sources.js";
 import { registerSheetsTools } from "./tools/sheets.js";
 import { registerSystemTools } from "./tools/system.js";
 
-// Decision #4: Streamable HTTP, bound to 127.0.0.1 only — never made
-// configurable via env, unlike MCP_PORT (see env.ts). createMcpExpressApp
-// enables DNS-rebinding/Origin protection automatically for a localhost
-// host (verified live during Phase 7 investigation, not just documented).
+// Decision #4/#61: Streamable HTTP. The actual TCP bind address is
+// env.MCP_HOST (127.0.0.1 locally, 0.0.0.0 in Docker — see env.ts).
+// createMcpExpressApp's `host` option is a DIFFERENT thing: it only
+// configures DNS-rebinding/Origin validation (which hostnames the `Host`/
+// `Origin` headers are allowed to carry), not the bind address — confirmed
+// by reading the installed .d.mts, not assumed. It stays hardcoded to
+// "127.0.0.1" here regardless of MCP_HOST, because host-side clients
+// (curl, mcp-remote, a local dev client) always send `Host: 127.0.0.1:<port>`
+// — whether connecting directly or via Docker's port-publish, which
+// preserves the client's own Host header — so validating against
+// "127.0.0.1" is correct either way (verified live during Phase 7 with a
+// spoofed-Host curl request correctly rejected).
 //
 // createMcpHandler's factory runs once per HTTP request (the SDK's
 // stateless-friendly model) — cheap here, since "registering tools" is
@@ -43,8 +51,8 @@ export function startMcpServer(db: DatabaseSync): { close: () => Promise<void> }
     void toNodeHandler(handler)(req, res, req.body);
   });
 
-  const httpServer = app.listen(env.MCP_PORT, "127.0.0.1", () => {
-    logger.info("MCP server listening", { url: `http://127.0.0.1:${env.MCP_PORT}/mcp` });
+  const httpServer = app.listen(env.MCP_PORT, env.MCP_HOST, () => {
+    logger.info("MCP server listening", { url: `http://${env.MCP_HOST}:${env.MCP_PORT}/mcp` });
   });
 
   return {

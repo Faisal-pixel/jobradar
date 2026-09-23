@@ -13,6 +13,7 @@ export interface SourceRunResult {
   jobsFound: number;
   jobsCreated: number;
   jobsSkipped: number;
+  jobsFailed: number;
   error?: string;
 }
 
@@ -46,12 +47,32 @@ export class SourceManager {
   }
 
   private async runOne(source: JobSource): Promise<SourceRunResult> {
+    // Only the discovery call itself (the network round-trip that produces
+    // the candidate list) is treated as a whole-source failure. Once we
+    // have candidates, each one is processed in its own try/catch below —
+    // a single bad candidate (a detail-page fetch error, an unexpected
+    // enrichment/dedup mismatch) must not discard already-committed
+    // progress from every candidate before it, or misreport a mostly-
+    // successful run as a total failure (found live: a run that had
+    // already created 122 jobs hit one bad candidate and reported
+    // jobsCreated: 0 before this fix — the jobs were still in the DB,
+    // the *report* was just wrong).
+    let discovered: DiscoveredJob[];
     try {
-      const discovered = await source.discoverJobs();
-      let created = 0;
-      let skipped = 0;
+      discovered = await source.discoverJobs();
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : String(cause);
+      this.sourceHealth.recordFailure(source.name, message);
+      logger.error("Source run failed", { source: source.name, error: message });
+      return { source: source.name, ok: false, jobsFound: 0, jobsCreated: 0, jobsSkipped: 0, jobsFailed: 0, error: message };
+    }
 
-      for (const candidate of discovered) {
+    let created = 0;
+    let skipped = 0;
+    let failed = 0;
+
+    for (const candidate of discovered) {
+      try {
         // Exact dedup: UNIQUE(source, source_job_id), checked before any
         // detail-page fetch — an already-known job costs nothing extra.
         const existing = this.jobs.findBySource(source.name, candidate.job.source_job_id);
@@ -64,22 +85,38 @@ export class SourceManager {
         const wasCreated = this.persist(enriched, source.name);
         if (wasCreated) created++;
         else skipped++;
+      } catch (cause) {
+        // Found live: enrichment re-extracts source_job_id from the
+        // detail page rather than trusting the id already checked above
+        // (see persist()'s own re-check) — on the rare page that disagrees,
+        // or any other per-candidate surprise, log and move on rather than
+        // losing every candidate after it in this run.
+        const message = cause instanceof Error ? cause.message : String(cause);
+        failed++;
+        logger.warn("Skipping one candidate after a processing error", {
+          source: source.name,
+          sourceJobId: candidate.job.source_job_id,
+          error: message,
+        });
       }
-
-      this.sourceHealth.recordSuccess(source.name);
-      logger.info("Source run complete", {
-        source: source.name,
-        found: discovered.length,
-        created,
-        skipped,
-      });
-      return { source: source.name, ok: true, jobsFound: discovered.length, jobsCreated: created, jobsSkipped: skipped };
-    } catch (cause) {
-      const message = cause instanceof Error ? cause.message : String(cause);
-      this.sourceHealth.recordFailure(source.name, message);
-      logger.error("Source run failed", { source: source.name, error: message });
-      return { source: source.name, ok: false, jobsFound: 0, jobsCreated: 0, jobsSkipped: 0, error: message };
     }
+
+    this.sourceHealth.recordSuccess(source.name);
+    logger.info("Source run complete", {
+      source: source.name,
+      found: discovered.length,
+      created,
+      skipped,
+      failed,
+    });
+    return {
+      source: source.name,
+      ok: true,
+      jobsFound: discovered.length,
+      jobsCreated: created,
+      jobsSkipped: skipped,
+      jobsFailed: failed,
+    };
   }
 
   // Only genuinely new jobs get enriched — this is what keeps request
@@ -112,6 +149,25 @@ export class SourceManager {
   }
 
   private persist(discovered: DiscoveredJob, sourceName: string): boolean {
+    // Re-check exact dedup here, using the *enriched* source_job_id — not
+    // just the pre-enrichment check in the caller's loop. enrich() re-
+    // extracts source_job_id from the detail page's own payload rather
+    // than trusting the id it was fetched with; found live in Phase 8
+    // testing: on one job, the detail page's id disagreed with the id
+    // already checked, and the enriched id turned out to already exist —
+    // a UNIQUE(source, source_job_id) violation that used to crash the
+    // whole run (see runOne's per-candidate try/catch for the other half
+    // of this fix).
+    const alreadyExists = this.jobs.findBySource(sourceName, discovered.job.source_job_id);
+    if (alreadyExists) {
+      logger.info("Enrichment revealed an already-known job under a different id, skipping", {
+        source: sourceName,
+        sourceJobId: discovered.job.source_job_id,
+        existingJobId: alreadyExists.id,
+      });
+      return false;
+    }
+
     const { company, isNew } = this.findOrCreateCompany(discovered.company);
 
     // Founders are only attached the moment a company is first created —

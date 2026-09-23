@@ -9,6 +9,11 @@ services:
       GOOGLE_SHEETS_SPREADSHEET_ID: ${GOOGLE_SHEETS_SPREADSHEET_ID:-}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      # Decision #61: must be 0.0.0.0 inside the container, or the "ports:"
+      # mapping below can never reach it — published-port traffic arrives
+      # over the container's bridge interface, not loopback. The 127.0.0.1
+      # bind-host restriction from Decision #4 is enforced below instead.
+      MCP_HOST: "0.0.0.0"
     volumes:
       - ./data:/app/data
       # The one-time OAuth sign-in (loopback browser flow) needs to run
@@ -17,6 +22,8 @@ services:
       # no browser involved.
       - ./credentials:/app/credentials
     ports:
-      # Streamable HTTP MCP server (Decision #4) — published to 127.0.0.1
-      # only, never 0.0.0.0, matching the server's own bind-host restriction.
+      # Streamable HTTP MCP server (Decision #4). This host-side binding —
+      # not the container's own bind address (see MCP_HOST above) — is what
+      # actually keeps the server unreachable from the LAN: published to
+      # 127.0.0.1 only, never 0.0.0.0.
       - "127.0.0.1:3939:3939"
