@@ -1,4 +1,5 @@
 import type { DatabaseSync } from "node:sqlite";
+import type { Outreach } from "../../domain/outreach/outreach.js";
 import { OutreachRepository } from "../../database/repositories/outreach-repository.js";
 import { CompaniesRepository } from "../../database/repositories/companies-repository.js";
 import { PeopleRepository } from "../../database/repositories/people-repository.js";
@@ -33,6 +34,25 @@ export class FollowUpAlertsService {
     this.companies = new CompaniesRepository(db);
     this.people = new PeopleRepository(db);
     this.jobs = new JobsRepository(db);
+  }
+
+  // Read-only lookup, no sends — Phase 10's scheduler folds this into the
+  // daily digest message instead of the individual per-item sends run()
+  // below does, per Faisal's "not a separate send" decision. Returns
+  // enough to format a compact one-line-per-item summary without a
+  // second round of company/person/job lookups.
+  findDue(): { due: Outreach[]; companyNameById: Map<number, string> } {
+    const today = new Date().toISOString().slice(0, 10);
+    const due = this.outreach.findDueFollowUps(today);
+
+    const companyNameById = new Map<number, string>();
+    for (const contact of due) {
+      if (contact.company_id === null || companyNameById.has(contact.company_id)) continue;
+      const name = this.companies.findById(contact.company_id)?.name;
+      if (name) companyNameById.set(contact.company_id, name);
+    }
+
+    return { due, companyNameById };
   }
 
   async run(): Promise<FollowUpAlertsSummary> {

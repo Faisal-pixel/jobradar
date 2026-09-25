@@ -14,6 +14,11 @@ services:
       # over the container's bridge interface, not loopback. The 127.0.0.1
       # bind-host restriction from Decision #4 is enforced below instead.
       MCP_HOST: "0.0.0.0"
+      # Phase 10's scheduler cadences (8am-10pm discovery window, 12:30pm
+      # digest, Sunday evening weekly report) are all wall-clock times in
+      # Faisal's actual timezone, not UTC — confirmed live that
+      # node:24-alpine's tzdata resolves this correctly.
+      TZ: "Africa/Lagos"
     volumes:
       - ./data:/app/data
       # The one-time OAuth sign-in (loopback browser flow) needs to run

@@ -14,6 +14,7 @@ import { registerSourceTools } from "../../src/mcp/tools/sources.js";
 import { registerSheetsTools } from "../../src/mcp/tools/sheets.js";
 import { registerSystemTools } from "../../src/mcp/tools/system.js";
 import { registerResearchTools } from "../../src/mcp/tools/research.js";
+import { registerAutomationTools } from "../../src/mcp/tools/automation.js";
 import { CompaniesRepository } from "../../src/database/repositories/companies-repository.js";
 import { JobsRepository } from "../../src/database/repositories/jobs-repository.js";
 import { ApplicationsRepository } from "../../src/database/repositories/applications-repository.js";
@@ -47,6 +48,8 @@ const EXPECTED_TOOL_NAMES = [
   "research_company",
   "research_company_people",
   "research_job",
+  "get_automation_status",
+  "run_now",
 ];
 
 function jsonOf(result: CallToolResult): unknown {
@@ -73,6 +76,7 @@ describe("MCP server (real protocol, in-memory transport)", () => {
     registerSheetsTools(server, db);
     registerSystemTools(server, db);
     registerResearchTools(server, db);
+    registerAutomationTools(server, db);
 
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     client = new Client({ name: "test-client", version: "1.0.0" });
@@ -83,7 +87,7 @@ describe("MCP server (real protocol, in-memory transport)", () => {
     await client.close();
   });
 
-  it("lists exactly the 27 tools (24 from Phase 7, 3 from Phase 9)", async () => {
+  it("lists exactly the 29 tools (24 from Phase 7, 3 from Phase 9, 2 from Phase 10)", async () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([...EXPECTED_TOOL_NAMES].sort());
   });
@@ -208,5 +212,34 @@ describe("MCP server (real protocol, in-memory transport)", () => {
     const result = await client.callTool({ name: "research_job", arguments: { jobId: job.id } });
     expect(result.isError).toBeFalsy();
     expect(jsonOf(result)).toMatchObject({ stillListed: true, changes: [] });
+  });
+
+  it("get_automation_status reports the scheduler as enabled with the confirmed cadences, and no runs yet", async () => {
+    const result = await client.callTool({ name: "get_automation_status", arguments: {} });
+    const status = jsonOf(result) as {
+      schedulerEnabled: boolean;
+      cadences: Record<string, string>;
+      lastRun: Record<string, unknown>;
+    };
+
+    expect(status.schedulerEnabled).toBe(true);
+    expect(status.cadences.discovery_cycle).toContain("every 3h");
+    expect(status.cadences.daily_digest).toContain("12:30");
+    expect(status.cadences.weekly_report).toContain("Sunday");
+    expect(status.lastRun).toEqual({ discovery_cycle: null, daily_digest: null, weekly_report: null });
+  });
+
+  it("run_now triggers daily_digest immediately (Telegram unconfigured -> a clean skip, not an error) and records it", async () => {
+    const result = await client.callTool({ name: "run_now", arguments: { task: "daily_digest" } });
+    expect(result.isError).toBeFalsy();
+
+    const runs = jsonOf(result) as Array<{ task: string; status: string; summary: unknown }>;
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ task: "daily_digest", status: "success", summary: { skipped: "Telegram not configured" } });
+
+    const status = jsonOf(await client.callTool({ name: "get_automation_status", arguments: {} })) as {
+      lastRun: Record<string, { status: string } | null>;
+    };
+    expect(status.lastRun.daily_digest?.status).toBe("success");
   });
 });

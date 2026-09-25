@@ -98,4 +98,26 @@ describe("ApplicationsRepository", () => {
       expect(repo.findByFilters({})).toHaveLength(3);
     });
   });
+
+  describe("findCreatedSince / findUpdatedSince (Phase 10 weekly report)", () => {
+    it("findCreatedSince excludes applications created before the cutoff", () => {
+      const cutoff = new Date(Date.now() + 1000).toISOString(); // 1s in the future
+      repo.create({ status: "planned" });
+      expect(repo.findCreatedSince(cutoff)).toHaveLength(0);
+      const past = new Date(Date.now() - 1000).toISOString();
+      expect(repo.findCreatedSince(past)).toHaveLength(1);
+    });
+
+    it("findUpdatedSince reflects both new and freshly-updated rows", async () => {
+      const created = repo.create({ status: "planned" });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const cutoff = new Date().toISOString();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
+      expect(repo.findUpdatedSince(cutoff)).toHaveLength(0); // created before cutoff, not touched since
+
+      repo.update(created.id, { status: "applied" });
+      expect(repo.findUpdatedSince(cutoff)).toHaveLength(1); // now touched after cutoff
+    });
+  });
 });

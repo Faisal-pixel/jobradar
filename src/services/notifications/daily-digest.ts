@@ -27,7 +27,11 @@ export class DailyDigestService {
     this.companies = new CompaniesRepository(db);
   }
 
-  async run(): Promise<DailyDigestSummary> {
+  // Pure content generation, no send — split out for Phase 10's scheduler,
+  // which bundles this with FollowUpAlertsService's due list into one
+  // combined message rather than two separate sends (see
+  // src/scheduler/tasks.ts). run() below is unchanged for send-digest.
+  async buildMessage(): Promise<{ message: string; jobCount: number }> {
     const since = new Date(Date.now() - LOOKBACK_HOURS * 60 * 60 * 1000).toISOString();
     const jobs = this.jobs.findDiscoveredSince(since);
 
@@ -43,9 +47,14 @@ export class DailyDigestService {
     }
 
     const message = formatDigest(jobs, companyNameByJobId, `in the last ${LOOKBACK_HOURS}h`);
+    return { message, jobCount: jobs.length };
+  }
+
+  async run(): Promise<DailyDigestSummary> {
+    const { message, jobCount } = await this.buildMessage();
     await this.telegram.sendMessage(message);
 
-    logger.info("Daily digest sent", { jobCount: jobs.length });
-    return { jobCount: jobs.length };
+    logger.info("Daily digest sent", { jobCount });
+    return { jobCount };
   }
 }

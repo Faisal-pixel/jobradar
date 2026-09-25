@@ -6,6 +6,7 @@ import { migration004CandidateProfile } from "./004_candidate_profile.js";
 import { migration005SheetSyncStatus } from "./005_sheet_sync_status.js";
 import { migration006JobAlertedAt } from "./006_job_alerted_at.js";
 import { migration007CompanySlug } from "./007_company_slug.js";
+import { migration008SchedulerRuns } from "./008_scheduler_runs.js";
 
 // New migrations are appended here, in order. Never reorder or remove
 // an entry once it has shipped — schema_migrations tracks applied
@@ -18,6 +19,7 @@ export const ALL_MIGRATIONS: Migration[] = [
   migration005SheetSyncStatus,
   migration006JobAlertedAt,
   migration007CompanySlug,
+  migration008SchedulerRuns,
 ];
 
 export { runMigrations } from "./migrator.js";

@@ -61,4 +61,23 @@ describe("DailyDigestService", () => {
     await new DailyDigestService(db, telegram).run();
     expect(telegram.sentMessages).toHaveLength(2); // re-running is harmless, not de-duplicated
   });
+
+  it("buildMessage generates content without sending — Phase 10's scheduler bundles it with follow-ups instead", async () => {
+    const company = companies.create({ name: "Acme" });
+    jobs.create({
+      title: "Backend Engineer",
+      source: "yc",
+      source_job_id: "1",
+      company_id: company.id,
+      fit_category: "A",
+      fit_score: 90,
+      date_found: new Date().toISOString(),
+    });
+
+    const { message, jobCount } = await new DailyDigestService(db, telegram).buildMessage();
+
+    expect(jobCount).toBe(1);
+    expect(message).toContain("Backend Engineer @ Acme");
+    expect(telegram.sentMessages).toHaveLength(0); // nothing sent
+  });
 });

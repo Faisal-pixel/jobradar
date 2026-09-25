@@ -1,7 +1,7 @@
 // Small debug CLI, not a JobRadar feature — a hand tool for verifying the
 // database and job sources from the command line (e.g.
-// `docker compose exec app node dist/app/cli.js list-companies`)
-// while there's no MCP server or scheduler yet to exercise them through.
+// `docker compose exec app node dist/app/cli.js list-companies`), and
+// for manually exercising services the MCP server/scheduler also call.
 import { getDb, closeDb } from "../database/connection.js";
 import { ALL_MIGRATIONS, runMigrations } from "../database/migrations/index.js";
 import { CompaniesRepository } from "../database/repositories/companies-repository.js";
@@ -22,6 +22,10 @@ import { TEST_NOTIFICATION_MESSAGE } from "../services/notifications/templates.j
 import { JobAlertsService } from "../services/notifications/job-alerts.js";
 import { DailyDigestService } from "../services/notifications/daily-digest.js";
 import { FollowUpAlertsService } from "../services/notifications/follow-up-alerts.js";
+import { WeeklyReportService } from "../services/notifications/weekly-report.js";
+import { SchedulerRunsRepository } from "../database/repositories/scheduler-runs-repository.js";
+import { SCHEDULER_TASKS, type SchedulerTask } from "../domain/automation/scheduler-run.js";
+import { executeTaskAndRecord } from "../scheduler/scheduler.js";
 import { ApplicationsRepository, type ApplicationFilters } from "../database/repositories/applications-repository.js";
 import { OutreachRepository, type OutreachFilters } from "../database/repositories/outreach-repository.js";
 import { ApplicationService } from "../services/applications/application-service.js";
@@ -63,6 +67,7 @@ async function main(): Promise<void> {
   const sheetSyncStatus = new SheetSyncStatusRepository(db);
   const applications = new ApplicationsRepository(db);
   const outreach = new OutreachRepository(db);
+  const schedulerRuns = new SchedulerRunsRepository(db);
 
   switch (command) {
     case "insert-company": {
@@ -159,6 +164,32 @@ async function main(): Promise<void> {
       if (!telegram) break;
       const result = await new FollowUpAlertsService(db, telegram).run();
       console.log(JSON.stringify(result, null, 2));
+      break;
+    }
+    case "send-weekly-report": {
+      const telegram = requireTelegramClient();
+      if (!telegram) break;
+      const result = await new WeeklyReportService(db, telegram).run();
+      console.log(JSON.stringify(result, null, 2));
+      break;
+    }
+    case "automation-status": {
+      const latest = Object.fromEntries(SCHEDULER_TASKS.map((task) => [task, schedulerRuns.findLatestByTask(task)]));
+      console.log(JSON.stringify({ schedulerEnabled: !env.SCHEDULER_DISABLED, lastRun: latest }, null, 2));
+      break;
+    }
+    case "run-now": {
+      const task = args[0];
+      if (task && !(SCHEDULER_TASKS as readonly string[]).includes(task)) {
+        console.error(`Usage: cli run-now [${SCHEDULER_TASKS.join("|")}]  (omit to run all three)`);
+        process.exitCode = 1;
+        break;
+      }
+      const tasksToRun = task ? [task as SchedulerTask] : [...SCHEDULER_TASKS];
+      for (const t of tasksToRun) {
+        const run = await executeTaskAndRecord(db, t);
+        console.log(JSON.stringify(run, null, 2));
+      }
       break;
     }
     case "get-telegram-chat-id": {
@@ -290,9 +321,11 @@ async function main(): Promise<void> {
       console.error(
         "Usage: cli <insert-company|list-companies|list-jobs|source-health|discover-jobs|" +
           "score-jobs|get-profile|search-jobs|sync-sheets|sheet-status|send-test|send-alerts|" +
-          "send-digest|send-followups|get-telegram-chat-id|log-application|update-application|" +
+          "send-digest|send-followups|send-weekly-report|automation-status|run-now|" +
+          "get-telegram-chat-id|log-application|update-application|" +
           "list-applications|log-outreach|update-outreach|list-outreach> [args]\n" +
-          "  search-jobs --status=reviewed --fitCategory=A --minFitScore=70 --remote",
+          "  search-jobs --status=reviewed --fitCategory=A --minFitScore=70 --remote\n" +
+          "  run-now [discovery_cycle|daily_digest|weekly_report]  (omit to run all three)",
       );
       process.exitCode = 1;
     }

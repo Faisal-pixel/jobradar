@@ -50,6 +50,27 @@ const envSchema = z.object({
   // mapping instead, not from the container's own bind address.
   MCP_PORT: z.coerce.number().default(3939),
   MCP_HOST: z.string().min(1).default("127.0.0.1"),
+  // Scheduler (Phase 10). Cadences confirmed with Faisal, not silently
+  // picked (Decisions Log): discovery/scoring/alerts/sheets-sync every
+  // 2-3h within a working window (defaults: every 3h, 8am-10pm), the
+  // combined digest+follow-ups at midday, the weekly report Sunday
+  // evening. All wall-clock times use the container's local time (TZ
+  // env var — docker-compose.yml sets Africa/Lagos; confirmed live that
+  // node:24-alpine's tzdata resolves it correctly).
+  DISCOVERY_INTERVAL_HOURS: z.coerce.number().min(1).default(3),
+  DISCOVERY_WINDOW_START_HOUR: z.coerce.number().min(0).max(23).default(8),
+  DISCOVERY_WINDOW_END_HOUR: z.coerce.number().min(0).max(23).default(22),
+  DIGEST_HOUR: z.coerce.number().min(0).max(23).default(12),
+  DIGEST_MINUTE: z.coerce.number().min(0).max(59).default(30),
+  // 0 = Sunday, matching JS Date#getDay().
+  WEEKLY_REPORT_DAY_OF_WEEK: z.coerce.number().min(0).max(6).default(0),
+  WEEKLY_REPORT_HOUR: z.coerce.number().min(0).max(23).default(19),
+  WEEKLY_REPORT_MINUTE: z.coerce.number().min(0).max(59).default(0),
+  // Escape hatch for tests/local dev — never set in docker-compose.yml.
+  SCHEDULER_DISABLED: z
+    .string()
+    .optional()
+    .transform((val) => val === "true"),
 });
 
 export type Env = z.infer<typeof envSchema>;

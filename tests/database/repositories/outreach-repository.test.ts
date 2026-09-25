@@ -96,4 +96,26 @@ describe("OutreachRepository", () => {
       expect(repo.findByFilters({ companyId, status: "closed" })).toHaveLength(1);
     });
   });
+
+  describe("findCreatedSince / findUpdatedSince (Phase 10 weekly report)", () => {
+    it("findCreatedSince excludes outreach created before the cutoff", () => {
+      const cutoff = new Date(Date.now() + 1000).toISOString();
+      repo.create({ status: "draft" });
+      expect(repo.findCreatedSince(cutoff)).toHaveLength(0);
+      const past = new Date(Date.now() - 1000).toISOString();
+      expect(repo.findCreatedSince(past)).toHaveLength(1);
+    });
+
+    it("findUpdatedSince reflects both new and freshly-updated rows", async () => {
+      const created = repo.create({ status: "draft" });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const cutoff = new Date().toISOString();
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
+      expect(repo.findUpdatedSince(cutoff)).toHaveLength(0);
+
+      repo.update(created.id, { status: "contacted" });
+      expect(repo.findUpdatedSince(cutoff)).toHaveLength(1);
+    });
+  });
 });

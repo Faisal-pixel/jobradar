@@ -27,4 +27,22 @@ describe("loadEnv", () => {
     expect(env.NODE_ENV).toBe("development");
     expect(env.DB_PATH).toBe("./data/jobradar.db");
   });
+
+  it("defaults the Phase 10 scheduler cadences to Faisal's confirmed decisions", () => {
+    const env = loadEnv({});
+    expect(env.DISCOVERY_INTERVAL_HOURS).toBe(3);
+    expect(env.DISCOVERY_WINDOW_START_HOUR).toBe(8);
+    expect(env.DISCOVERY_WINDOW_END_HOUR).toBe(22);
+    expect(env.DIGEST_HOUR).toBe(12);
+    expect(env.DIGEST_MINUTE).toBe(30);
+    expect(env.WEEKLY_REPORT_DAY_OF_WEEK).toBe(0); // Sunday
+    expect(env.WEEKLY_REPORT_HOUR).toBe(19);
+    expect(env.SCHEDULER_DISABLED).toBe(false);
+  });
+
+  it("SCHEDULER_DISABLED only becomes true for the literal string 'true'", () => {
+    expect(loadEnv({}).SCHEDULER_DISABLED).toBe(false);
+    expect(loadEnv({ SCHEDULER_DISABLED: "false" }).SCHEDULER_DISABLED).toBe(false);
+    expect(loadEnv({ SCHEDULER_DISABLED: "true" }).SCHEDULER_DISABLED).toBe(true);
+  });
 });

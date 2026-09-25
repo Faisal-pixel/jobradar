@@ -88,6 +88,27 @@ export class OutreachRepository {
     return rows as unknown as Outreach[];
   }
 
+  // Phase 10's weekly report: new outreach logged this week — mirrors
+  // JobsRepository.findDiscoveredSince's shape/reasoning.
+  findCreatedSince(isoTimestamp: string): Outreach[] {
+    const rows = this.db
+      .prepare("SELECT * FROM outreach WHERE created_at >= ? ORDER BY created_at")
+      .all(isoTimestamp);
+    return rows as unknown as Outreach[];
+  }
+
+  // Outreach touched this week — used for an approximate response-rate
+  // signal (a row updated this week that's now 'responded' likely got
+  // its response this week), not a precise one: there's no separate
+  // "responded at" timestamp, only updated_at, which also changes for
+  // any other edit to the row.
+  findUpdatedSince(isoTimestamp: string): Outreach[] {
+    const rows = this.db
+      .prepare("SELECT * FROM outreach WHERE updated_at >= ? ORDER BY updated_at")
+      .all(isoTimestamp);
+    return rows as unknown as Outreach[];
+  }
+
   update(id: number, patch: OutreachPatch): Outreach {
     const existing = this.findById(id);
     if (!existing) throw new NotFoundError("Outreach", id);

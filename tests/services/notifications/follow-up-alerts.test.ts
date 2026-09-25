@@ -78,4 +78,16 @@ describe("FollowUpAlertsService", () => {
 
     expect(telegram.sentMessages).toHaveLength(2);
   });
+
+  it("findDue is read-only — no message sent, returns due items plus a company-name lookup (Phase 10 bundling)", async () => {
+    const company = companies.create({ name: "Acme" });
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    outreach.create({ company_id: company.id, status: "contacted", follow_up_date: yesterday });
+
+    const { due, companyNameById } = new FollowUpAlertsService(db, telegram).findDue();
+
+    expect(due).toHaveLength(1);
+    expect(companyNameById.get(company.id)).toBe("Acme");
+    expect(telegram.sentMessages).toHaveLength(0);
+  });
 });
