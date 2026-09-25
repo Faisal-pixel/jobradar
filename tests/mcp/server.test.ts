@@ -15,6 +15,11 @@ import { registerSheetsTools } from "../../src/mcp/tools/sheets.js";
 import { registerSystemTools } from "../../src/mcp/tools/system.js";
 import { registerResearchTools } from "../../src/mcp/tools/research.js";
 import { registerAutomationTools } from "../../src/mcp/tools/automation.js";
+import { registerCandidateProfileResource } from "../../src/mcp/resources/candidate-profile.js";
+import { registerDailyJobHuntPrompt } from "../../src/mcp/prompts/daily-job-hunt.js";
+import { registerCompanyDeepDivePrompt } from "../../src/mcp/prompts/company-deep-dive.js";
+import { registerWeeklyJobReviewPrompt } from "../../src/mcp/prompts/weekly-job-review.js";
+import { registerPrepForOutreachPrompt } from "../../src/mcp/prompts/prep-for-outreach.js";
 import { CompaniesRepository } from "../../src/database/repositories/companies-repository.js";
 import { JobsRepository } from "../../src/database/repositories/jobs-repository.js";
 import { ApplicationsRepository } from "../../src/database/repositories/applications-repository.js";
@@ -77,6 +82,11 @@ describe("MCP server (real protocol, in-memory transport)", () => {
     registerSystemTools(server, db);
     registerResearchTools(server, db);
     registerAutomationTools(server, db);
+    registerCandidateProfileResource(server, db);
+    registerDailyJobHuntPrompt(server);
+    registerCompanyDeepDivePrompt(server);
+    registerWeeklyJobReviewPrompt(server);
+    registerPrepForOutreachPrompt(server);
 
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     client = new Client({ name: "test-client", version: "1.0.0" });
@@ -241,5 +251,71 @@ describe("MCP server (real protocol, in-memory transport)", () => {
       lastRun: Record<string, { status: string } | null>;
     };
     expect(status.lastRun.daily_digest?.status).toBe("success");
+  });
+
+  describe("Phase 11: resources", () => {
+    it("lists candidate://profile", async () => {
+      const { resources } = await client.listResources();
+      expect(resources).toHaveLength(1);
+      expect(resources[0]).toMatchObject({ name: "candidate_profile", uri: "candidate://profile" });
+    });
+
+    it("reads candidate://profile and returns the real seeded profile, not a placeholder", async () => {
+      const result = await client.readResource({ uri: "candidate://profile" });
+      const content = result.contents[0];
+      expect(content?.mimeType).toBe("application/json");
+      const profile = JSON.parse((content as { text: string }).text);
+      expect(profile.location).toBe("Nigeria");
+      expect(profile.location_code).toBe("NG");
+    });
+  });
+
+  describe("Phase 11: prompts", () => {
+    it("lists all four prompts", async () => {
+      const { prompts } = await client.listPrompts();
+      expect(prompts.map((p) => p.name).sort()).toEqual(
+        ["company_deep_dive", "daily_job_hunt", "prep_for_outreach", "weekly_job_review"].sort(),
+      );
+    });
+
+    it("daily_job_hunt returns an instructional message naming the right tools, and takes no arguments", async () => {
+      const result = await client.getPrompt({ name: "daily_job_hunt" });
+      const text = (result.messages[0]?.content as { text: string }).text;
+      expect(text).toContain("get_automation_status");
+      expect(text).toContain("search_jobs");
+      expect(text).toContain("list_pending_outreach");
+    });
+
+    it("company_deep_dive interpolates the given company and names every tool in the composed brief", async () => {
+      const result = await client.getPrompt({ name: "company_deep_dive", arguments: { company: "Acme" } });
+      const text = (result.messages[0]?.content as { text: string }).text;
+      expect(text).toContain("Acme");
+      expect(text).toContain("get_company_people");
+      expect(text).toContain("research_company_people");
+      expect(text).toContain("get_company_jobs");
+    });
+
+    it("weekly_job_review explicitly forbids calling run_now, to avoid a duplicate real Telegram send", async () => {
+      const result = await client.getPrompt({ name: "weekly_job_review" });
+      const text = (result.messages[0]?.content as { text: string }).text;
+      expect(text).toContain("Do NOT call run_now");
+    });
+
+    it("prep_for_outreach interpolates company and optional person, and states the draft-only safety rule", async () => {
+      const result = await client.getPrompt({
+        name: "prep_for_outreach",
+        arguments: { company: "Acme", person: "Jane Founder" },
+      });
+      const text = (result.messages[0]?.content as { text: string }).text;
+      expect(text).toContain("Jane Founder at Acme");
+      expect(text).toContain("draft only");
+      expect(text).toContain("nothing gets sent automatically");
+    });
+
+    it("prep_for_outreach works with just a company, no person", async () => {
+      const result = await client.getPrompt({ name: "prep_for_outreach", arguments: { company: "Acme" } });
+      const text = (result.messages[0]?.content as { text: string }).text;
+      expect(text).toContain("Help me prepare outreach to Acme");
+    });
   });
 });

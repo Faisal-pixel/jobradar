@@ -16,6 +16,11 @@ import { registerSheetsTools } from "./tools/sheets.js";
 import { registerSystemTools } from "./tools/system.js";
 import { registerResearchTools } from "./tools/research.js";
 import { registerAutomationTools } from "./tools/automation.js";
+import { registerCandidateProfileResource } from "./resources/candidate-profile.js";
+import { registerDailyJobHuntPrompt } from "./prompts/daily-job-hunt.js";
+import { registerCompanyDeepDivePrompt } from "./prompts/company-deep-dive.js";
+import { registerWeeklyJobReviewPrompt } from "./prompts/weekly-job-review.js";
+import { registerPrepForOutreachPrompt } from "./prompts/prep-for-outreach.js";
 
 // Decision #4/#61: Streamable HTTP. The actual TCP bind address is
 // env.MCP_HOST (127.0.0.1 locally, 0.0.0.0 in Docker — see env.ts).
@@ -47,6 +52,11 @@ export function startMcpServer(db: DatabaseSync): { close: () => Promise<void> }
     registerSystemTools(server, db);
     registerResearchTools(server, db);
     registerAutomationTools(server, db);
+    registerCandidateProfileResource(server, db);
+    registerDailyJobHuntPrompt(server);
+    registerCompanyDeepDivePrompt(server);
+    registerWeeklyJobReviewPrompt(server);
+    registerPrepForOutreachPrompt(server);
     return server;
   });
 
