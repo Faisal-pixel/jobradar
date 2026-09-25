@@ -22,6 +22,17 @@ describe("CompaniesRepository", () => {
     expect(company.updated_at).toBe(company.created_at);
   });
 
+  it("stores and updates slug (Phase 9, migration 007)", () => {
+    const created = repo.create({ name: "Acme Robotics", slug: "acme-robotics" });
+    expect(created.slug).toBe("acme-robotics");
+
+    const noSlug = repo.create({ name: "No Slug Yet" });
+    expect(noSlug.slug).toBeNull();
+
+    const updated = repo.update(noSlug.id, { slug: "no-slug-yet" });
+    expect(updated.slug).toBe("no-slug-yet");
+  });
+
   it("finds a company by id, and returns null when missing", () => {
     const created = repo.create({ name: "Acme Robotics" });
     expect(repo.findById(created.id)).toEqual(created);

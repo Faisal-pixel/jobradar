@@ -15,6 +15,9 @@ export interface Company {
   // Relative description as of discovery time (e.g. "4 months ago"), not
   // a real timestamp — see migration 003_company_last_active.
   last_active: string | null;
+  // Y Combinator / Work at a Startup's own identifier, e.g. "mason" for
+  // ycombinator.com/companies/mason — see migration 007_company_slug.
+  slug: string | null;
   created_at: string;
   updated_at: string;
 }

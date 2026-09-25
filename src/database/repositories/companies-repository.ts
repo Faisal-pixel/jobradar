@@ -10,8 +10,8 @@ export class CompaniesRepository {
       .prepare(
         `INSERT INTO companies
            (name, website, domain, yc_batch, team_size, industry, description,
-            funding, funding_stage, location, remote_policy, notes, last_active)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            funding, funding_stage, location, remote_policy, notes, last_active, slug)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          RETURNING *`,
       )
       .get(
@@ -28,6 +28,7 @@ export class CompaniesRepository {
         input.remote_policy ?? null,
         input.notes ?? null,
         input.last_active ?? null,
+        input.slug ?? null,
       );
     return row as unknown as Company;
   }

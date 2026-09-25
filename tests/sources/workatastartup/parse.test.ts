@@ -95,6 +95,9 @@ describe("normalizeSearchJob (real fixture: search-response.json)", () => {
     expect(discovered.company.name).toBe("Nango");
     expect(discovered.company.yc_batch).toBe("W23");
     expect(discovered.company.last_active).toBe("10 months ago");
+    // Phase 9 (migration 007): the same slug ycombinator.com/companies/<slug>
+    // uses, already present on this cheap tier and previously discarded.
+    expect(discovered.company.slug).toBe("nango");
   });
 });
 
@@ -122,6 +125,7 @@ describe("extractInertiaPageProps + normalizeJobDetail (real fixture: job-detail
     expect(discovered.company.website).toBe("http://www.bymason.com");
     expect(discovered.company.domain).toBe("bymason.com");
     expect(discovered.company.team_size).toBe(65);
+    expect(discovered.company.slug).toBe("mason");
     // last_active is search-tier-only — normalizeJobDetail alone can't
     // know it; SourceManager.enrich() is what merges it in.
     expect(discovered.company.last_active).toBeUndefined();

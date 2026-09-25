@@ -65,6 +65,14 @@ export const waasCompanyDetailSchema = z.object({
   industries: z.array(z.string()).nullable().optional(),
   founders: z.array(waasFounderSchema).optional(),
   jobs: z.array(z.unknown()).optional(),
+  // Self-declared by the company to Work at a Startup, already fetched on
+  // every detail-page enrichment but previously discarded — surfaced by
+  // Phase 9's research_company, never persisted onto the companies table
+  // (CLAUDE.md: don't add fields "because they might be useful later").
+  techDescriptionHtml: z.string().nullable().optional(),
+  hiringDescriptionHtml: z.string().nullable().optional(),
+  facebookUrl: z.string().nullable().optional(),
+  twitterUrl: z.string().nullable().optional(),
 });
 export type WaasCompanyDetail = z.infer<typeof waasCompanyDetailSchema>;
 

@@ -26,7 +26,7 @@ export function extractInertiaPageProps(html: string): unknown {
   return page.props;
 }
 
-function stripHtml(html: string | null | undefined): string {
+export function stripHtml(html: string | null | undefined): string {
   if (!html) return "";
   return cheerio.load(html).text().replace(/\s+/g, " ").trim();
 }
@@ -126,6 +126,9 @@ export function normalizeSearchJob(raw: WaasSearchJob): DiscoveredJob {
     // SourceManager.enrich(), which merges this across tiers rather
     // than letting detail-tier enrichment silently drop it.
     last_active: raw.companyLastActiveAt ?? null,
+    // Same identifier Y Combinator's own company pages use (Phase 9's
+    // research_company) — available on both tiers, so captured here too.
+    slug: raw.companySlug,
   };
 
   return { job, company };
@@ -181,6 +184,7 @@ export function normalizeJobDetail(
     team_size: company.teamSize ?? null,
     industry: company.industry ?? null,
     location: company.location ?? null,
+    slug: company.slug,
   };
 
   const founders = company.founders?.map((founder) => normalizeFounder(founder, jobUrl(detail.id))) ?? [];

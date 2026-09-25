@@ -13,6 +13,7 @@ import { registerOutreachTools } from "../../src/mcp/tools/outreach.js";
 import { registerSourceTools } from "../../src/mcp/tools/sources.js";
 import { registerSheetsTools } from "../../src/mcp/tools/sheets.js";
 import { registerSystemTools } from "../../src/mcp/tools/system.js";
+import { registerResearchTools } from "../../src/mcp/tools/research.js";
 import { CompaniesRepository } from "../../src/database/repositories/companies-repository.js";
 import { JobsRepository } from "../../src/database/repositories/jobs-repository.js";
 import { ApplicationsRepository } from "../../src/database/repositories/applications-repository.js";
@@ -43,6 +44,9 @@ const EXPECTED_TOOL_NAMES = [
   "get_sheet_status",
   "get_system_health",
   "get_errors",
+  "research_company",
+  "research_company_people",
+  "research_job",
 ];
 
 function jsonOf(result: CallToolResult): unknown {
@@ -68,6 +72,7 @@ describe("MCP server (real protocol, in-memory transport)", () => {
     registerSourceTools(server, db);
     registerSheetsTools(server, db);
     registerSystemTools(server, db);
+    registerResearchTools(server, db);
 
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     client = new Client({ name: "test-client", version: "1.0.0" });
@@ -78,7 +83,7 @@ describe("MCP server (real protocol, in-memory transport)", () => {
     await client.close();
   });
 
-  it("lists exactly the 24 Phase 7 tools", async () => {
+  it("lists exactly the 27 tools (24 from Phase 7, 3 from Phase 9)", async () => {
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([...EXPECTED_TOOL_NAMES].sort());
   });
@@ -177,5 +182,31 @@ describe("MCP server (real protocol, in-memory transport)", () => {
     const result = await client.callTool({ name: "get_errors", arguments: {} });
     const errors = jsonOf(result) as Array<{ kind: string; target: string }>;
     expect(errors).toEqual([expect.objectContaining({ kind: "source", target: "workatastartup" })]);
+  });
+
+  it("research_company returns a helpful not-found error for an unknown company", async () => {
+    const result = await client.callTool({ name: "research_company", arguments: { companyId: 9999 } });
+    expect(result.isError).toBe(true);
+    const text = result.content[0];
+    expect(text?.type === "text" && text.text).toContain("not found");
+  });
+
+  it("research_company_people returns a helpful not-found error for an unknown company", async () => {
+    const result = await client.callTool({ name: "research_company_people", arguments: { companyId: 9999 } });
+    expect(result.isError).toBe(true);
+  });
+
+  it("research_job returns a helpful not-found error for an unknown job", async () => {
+    const result = await client.callTool({ name: "research_job", arguments: { jobId: 9999 } });
+    expect(result.isError).toBe(true);
+  });
+
+  it("research_job skips network entirely for a job from a source other than Work at a Startup", async () => {
+    const jobs = new JobsRepository(db);
+    const job = jobs.create({ title: "Hypothetical", source: "future-source", source_job_id: "1" });
+
+    const result = await client.callTool({ name: "research_job", arguments: { jobId: job.id } });
+    expect(result.isError).toBeFalsy();
+    expect(jsonOf(result)).toMatchObject({ stillListed: true, changes: [] });
   });
 });

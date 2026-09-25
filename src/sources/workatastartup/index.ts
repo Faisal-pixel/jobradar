@@ -2,7 +2,7 @@ import { fetchWithRetry } from "../http-client.js";
 import type { JobSource, DiscoveredJob, SourceHealthCheck } from "../job-source.js";
 import { getSearchQueries } from "../../config/search-queries.js";
 import { logger } from "../../shared/logger.js";
-import { waasSearchResponseSchema, waasJobDetailPagePropsSchema } from "./types.js";
+import { waasSearchResponseSchema, waasJobDetailPagePropsSchema, type WaasCompanyDetail } from "./types.js";
 import { SOURCE_NAME, normalizeSearchJob, normalizeJobDetail, extractInertiaPageProps } from "./parse.js";
 
 const BASE_URL = "https://www.workatastartup.com";
@@ -40,6 +40,22 @@ export class WorkAtAStartupSource implements JobSource {
   }
 
   async getJob(sourceJobId: string): Promise<DiscoveredJob | null> {
+    const props = await this.fetchJobDetailPage(sourceJobId);
+    if (!props) return null;
+    return normalizeJobDetail(props.job, props.company, props.applyUrl);
+  }
+
+  // Phase 9: research_company needs fields normalizeJobDetail deliberately
+  // drops (techDescriptionHtml, hiringDescriptionHtml, facebookUrl,
+  // twitterUrl — not persisted company columns, see waasCompanyDetailSchema).
+  // Reuses the same fetch — no extra request beyond what getJob already
+  // makes for the same job id.
+  async getCompanyResearchDetail(sourceJobId: string): Promise<WaasCompanyDetail | null> {
+    const props = await this.fetchJobDetailPage(sourceJobId);
+    return props?.company ?? null;
+  }
+
+  private async fetchJobDetailPage(sourceJobId: string) {
     const url = `${BASE_URL}/jobs/${sourceJobId}`;
     const response = await fetchWithRetry(url, { headers: { Accept: "text/html" } });
 
@@ -49,8 +65,7 @@ export class WorkAtAStartupSource implements JobSource {
     }
 
     const html = await response.text();
-    const props = waasJobDetailPagePropsSchema.parse(extractInertiaPageProps(html));
-    return normalizeJobDetail(props.job, props.company, props.applyUrl);
+    return waasJobDetailPagePropsSchema.parse(extractInertiaPageProps(html));
   }
 
   async healthCheck(): Promise<SourceHealthCheck> {

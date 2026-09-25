@@ -99,6 +99,28 @@ describe("WorkAtAStartupSource", () => {
     expect(result).toBeNull();
   });
 
+  it("getCompanyResearchDetail returns the research-only fields getJob's normalization drops (Phase 9)", async () => {
+    fetchMock.mockResolvedValue(htmlResponse(jobDetailFixture));
+    const source = new WorkAtAStartupSource();
+
+    const promise = source.getCompanyResearchDetail("13302");
+    await vi.runAllTimersAsync();
+    const detail = await promise;
+
+    expect(detail?.techDescriptionHtml).toContain("Android");
+    expect(detail?.hiringDescriptionHtml).toContain("Mason provides");
+    expect(fetchMock).toHaveBeenCalledTimes(1); // same request getJob would make, no extra round-trip
+  });
+
+  it("getCompanyResearchDetail returns null on a 404, same as getJob", async () => {
+    fetchMock.mockResolvedValue(new Response("not found", { status: 404 }));
+    const source = new WorkAtAStartupSource();
+
+    const promise = source.getCompanyResearchDetail("999999999");
+    await vi.runAllTimersAsync();
+    expect(await promise).toBeNull();
+  });
+
   it("healthCheck reports healthy on a 200 and unhealthy otherwise", async () => {
     const source = new WorkAtAStartupSource();
 

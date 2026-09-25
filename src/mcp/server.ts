@@ -14,6 +14,7 @@ import { registerOutreachTools } from "./tools/outreach.js";
 import { registerSourceTools } from "./tools/sources.js";
 import { registerSheetsTools } from "./tools/sheets.js";
 import { registerSystemTools } from "./tools/system.js";
+import { registerResearchTools } from "./tools/research.js";
 
 // Decision #4/#61: Streamable HTTP. The actual TCP bind address is
 // env.MCP_HOST (127.0.0.1 locally, 0.0.0.0 in Docker — see env.ts).
@@ -43,6 +44,7 @@ export function startMcpServer(db: DatabaseSync): { close: () => Promise<void> }
     registerSourceTools(server, db);
     registerSheetsTools(server, db);
     registerSystemTools(server, db);
+    registerResearchTools(server, db);
     return server;
   });
 
