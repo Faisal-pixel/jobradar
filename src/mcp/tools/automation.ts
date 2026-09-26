@@ -7,6 +7,7 @@ import { executeTaskAndRecord } from "../../scheduler/scheduler.js";
 import { computeDailyTimes, type TimeOfDay } from "../../scheduler/timing.js";
 import { env } from "../../config/env.js";
 import { toolResult } from "../tool-helpers.js";
+import { logger } from "../../shared/logger.js";
 
 function formatTime(time: TimeOfDay): string {
   return `${time.hour}:${String(time.minute).padStart(2, "0")}`;
@@ -70,18 +71,36 @@ export function registerAutomationTools(server: McpServer, db: DatabaseSync): vo
       title: "Run Now",
       description:
         "Trigger a scheduled task immediately instead of waiting for its clock. Omit `task` to run all three " +
-        "in order (discovery_cycle, then daily_digest, then weekly_report). Recorded to scheduler_runs exactly " +
-        "like an automatic run, so get_automation_status reflects it afterward.",
+        "in order (discovery_cycle, then daily_digest, then weekly_report). Returns as soon as the run(s) are " +
+        "started, not when they finish — discovery_cycle in particular can take well over a minute (multiple " +
+        "rate-limited external requests), long enough to risk a client-side timeout if this waited. Check " +
+        "get_automation_status shortly afterward for the real outcome, recorded to scheduler_runs exactly like " +
+        "an automatic run — the same fire-and-forget pattern the scheduler's own clock already uses.",
       inputSchema: z.object({ task: z.enum(SCHEDULER_TASKS).optional() }),
     },
     async ({ task }) => {
       const tasksToRun = task ? [task] : [...SCHEDULER_TASKS];
-      const results = [];
-      for (const t of tasksToRun) {
-        const run = await executeTaskAndRecord(db, t);
-        results.push({ ...run, summary: run.summary ? JSON.parse(run.summary) : null });
-      }
-      return toolResult(results);
+
+      // Deliberately not awaited — see the description above and
+      // Decisions Log. executeTaskAndRecord never throws (Decisions Log
+      // #76's last-resort catch), so this .catch() is purely a defensive
+      // backstop, not an expected path.
+      void (async () => {
+        for (const t of tasksToRun) {
+          await executeTaskAndRecord(db, t).catch((cause: unknown) =>
+            logger.error("run_now: unexpected error outside executeTaskAndRecord's own safety net", {
+              task: t,
+              error: cause instanceof Error ? cause.message : String(cause),
+            }),
+          );
+        }
+      })();
+
+      return toolResult({
+        status: "started",
+        tasks: tasksToRun,
+        note: "Started in the background — call get_automation_status shortly for the real outcome.",
+      });
     },
   );
 }

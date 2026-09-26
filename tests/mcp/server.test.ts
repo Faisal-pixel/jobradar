@@ -239,18 +239,23 @@ describe("MCP server (real protocol, in-memory transport)", () => {
     expect(status.lastRun).toEqual({ discovery_cycle: null, daily_digest: null, weekly_report: null });
   });
 
-  it("run_now triggers daily_digest immediately (Telegram unconfigured -> a clean skip, not an error) and records it", async () => {
+  it("run_now returns immediately (fire-and-forget), not once the task finishes", async () => {
     const result = await client.callTool({ name: "run_now", arguments: { task: "daily_digest" } });
     expect(result.isError).toBeFalsy();
+    expect(jsonOf(result)).toMatchObject({ status: "started", tasks: ["daily_digest"] });
+  });
 
-    const runs = jsonOf(result) as Array<{ task: string; status: string; summary: unknown }>;
-    expect(runs).toHaveLength(1);
-    expect(runs[0]).toMatchObject({ task: "daily_digest", status: "success", summary: { skipped: "Telegram not configured" } });
+  it("run_now's fire-and-forget run still gets recorded to scheduler_runs, same as an automatic run", async () => {
+    await client.callTool({ name: "run_now", arguments: { task: "daily_digest" } });
+    await new Promise((resolve) => setTimeout(resolve, 20)); // let the un-awaited background run finish
 
     const status = jsonOf(await client.callTool({ name: "get_automation_status", arguments: {} })) as {
-      lastRun: Record<string, { status: string } | null>;
+      lastRun: Record<string, { status: string; summary: unknown } | null>;
     };
-    expect(status.lastRun.daily_digest?.status).toBe("success");
+    expect(status.lastRun.daily_digest).toMatchObject({
+      status: "success",
+      summary: { skipped: "Telegram not configured" },
+    });
   });
 
   describe("Phase 11: resources", () => {
